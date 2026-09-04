@@ -1,0 +1,52 @@
+#!/bin/sh
+# main / master をチェックアウトしている「本体リポジトリ」でのブランチ切り替えを禁止する。
+# 作業ブランチは gwq のワークツリーで扱う。
+#   - リンクドワークツリー(gwq 配下)では何も制限しない
+#   - worktree 操作 (gwq add / git worktree add) は許可する
+#   - どうしても切り替えたいときは GIT_ALLOW_BRANCH_SWITCH=1 を付ける
+
+[ "$1" = "prepared" ] || exit 0
+[ "${GIT_ALLOW_BRANCH_SWITCH:-}" = "1" ] && exit 0
+
+# gwq add / git worktree add が張る HEAD は素通しする
+parent=$(ps -o args= -p "$PPID" 2>/dev/null)
+case "$parent" in
+	*" worktree "*) exit 0 ;;
+esac
+
+# 本体(メインワークツリー)以外は対象外
+gitdir=$(git rev-parse --absolute-git-dir 2>/dev/null </dev/null) || exit 0
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null </dev/null) || exit 0
+[ "$gitdir" = "$common" ] || exit 0
+
+current=$(git symbolic-ref --quiet --short HEAD 2>/dev/null </dev/null) || exit 0
+case "$current" in
+	main|master) ;;
+	*) exit 0 ;;
+esac
+
+target=
+while read -r old new ref; do
+	[ "$ref" = "HEAD" ] || continue
+	case "$new" in
+		ref:refs/heads/*) target=${new#ref:refs/heads/} ;;
+	esac
+done
+[ -n "$target" ] || exit 0
+
+cat >&2 <<MSG
+
+  ✗ このディレクトリは '$current' 専用です ('$target' への切り替えを中止しました)
+
+    作業ブランチは gwq のワークツリーで扱ってください:
+
+      gwq add -b $target      # 新規ブランチ
+      gwq add $target         # 既存ブランチ
+      cd "\$(gwq get $target)"
+
+    どうしても本体で切り替える場合のみ:
+
+      GIT_ALLOW_BRANCH_SWITCH=1 git switch $target
+
+MSG
+exit 1

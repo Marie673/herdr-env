@@ -1,0 +1,36 @@
+id = "pane-title-sync"
+name = "Pane Title Sync"
+version = "0.1.0"
+# [[startup]] hooks landed in Herdr 0.7.5
+min_herdr_version = "0.7.5"
+description = "ペイン名とタブ名をエージェントの会話タイトルに同期して、サイドバー行と画面上のペインを対応づける"
+platforms = ["macos"]
+
+# 会話タイトルはランタイム情報なので、サーバ起動のたびに付け直す
+[[startup]]
+command = ["/usr/bin/python3", "bin/sync.py"]
+
+# タイトル変更そのもののイベントは無いので、状態変化とフォーカスで拾う
+[[events]]
+on = "pane.agent_status_changed"
+command = ["/usr/bin/python3", "bin/sync.py"]
+
+[[events]]
+on = "pane.focused"
+command = ["/usr/bin/python3", "bin/sync.py"]
+
+[[events]]
+on = "pane.created"
+command = ["/usr/bin/python3", "bin/sync.py"]
+
+[[actions]]
+id = "sync"
+title = "ペイン名/タブ名を会話タイトルに同期"
+contexts = ["workspace", "pane"]
+command = ["/usr/bin/python3", "bin/sync.py"]
+
+[[actions]]
+id = "clear"
+title = "同期した名前を消す（手動命名は残す）"
+contexts = ["workspace", "pane"]
+command = ["/usr/bin/python3", "bin/sync.py", "--clear"]

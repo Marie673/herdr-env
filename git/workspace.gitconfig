@@ -1,0 +1,3 @@
+# ~/workspace 配下(ghq 管理)のリポジトリにだけ適用される設定
+[core]
+	hooksPath = ~/.config/git/hooks

@@ -1,0 +1,4 @@
+# プラグインのランタイム状態（配置後に生成される）
+herdr/plugins/local/agent-view-space/scope
+herdr/plugins/local/pane-title-sync/state.json
+.DS_Store

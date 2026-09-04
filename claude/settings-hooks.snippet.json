@@ -1,0 +1,57 @@
+{
+  "//": "~/.claude/settings.json にマージするスニペット。herdr-activity.sh は ~/.claude/hooks/ に置く。",
+  "//2": "SessionStart の herdr-agent-state.sh は herdr の Claude インテグレーションが自動生成・自動登録するもの（herdr が上書き管理する）。手で入れない。",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" tool"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" prompt"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" stop"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" notify"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" clear"
+          }
+        ]
+      }
+    ]
+  }
+}

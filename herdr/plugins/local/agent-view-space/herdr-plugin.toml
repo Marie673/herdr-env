@@ -1,0 +1,30 @@
+id = "agent-view-space"
+name = "Agent View: current space"
+version = "0.1.0"
+# [[startup]] hooks landed in Herdr 0.7.5
+min_herdr_version = "0.7.5"
+description = "agentsペインを選択中のspaceのエージェントだけに絞る（agent.view.set のフィルタを起動時に適用）"
+platforms = ["macos", "linux"]
+
+# サーバ起動・live handoff のたびにビューを張り直す。
+# agent.view はランタイム状態なので config.toml では永続化できない。
+[[startup]]
+command = ["bash", "bin/apply.sh"]
+
+[[actions]]
+id = "current"
+title = "Agents: 現在のspaceだけ表示"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/apply.sh"]
+
+[[actions]]
+id = "all"
+title = "Agents: すべてのspaceを表示"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/clear.sh"]
+
+[[actions]]
+id = "toggle"
+title = "Agents: 現在のspaceだけ / 全部 を切り替え"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/toggle.sh"]
