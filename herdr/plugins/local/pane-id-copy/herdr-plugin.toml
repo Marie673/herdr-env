@@ -1,0 +1,18 @@
+id = "pane-id-copy"
+name = "Pane ID Copy"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "対象ペインの pane_id をクリップボードへコピーする（他のペインからそのペインを指すため）"
+platforms = ["macos", "linux"]
+
+[[actions]]
+id = "copy"
+title = "このペインのIDをコピー"
+contexts = ["pane", "workspace"]
+command = ["bash", "bin/copy.sh"]
+
+[[actions]]
+id = "copy-target"
+title = "このペインのIDを操作コマンド付きでコピー"
+contexts = ["pane", "workspace"]
+command = ["bash", "bin/copy.sh", "--with-hint"]

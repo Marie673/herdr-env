@@ -135,3 +135,10 @@ key = "prefix+shift+a"
 type = "plugin_action"
 command = "agent-view-space.toggle"
 description = "toggle agents pane scope (current space / all)"
+
+# 今いるペインの pane_id をクリップボードへ（他ペインからそのペインを指す用、2026-09-07 追加）
+[[keys.command]]
+key = "prefix+shift+c"
+type = "plugin_action"
+command = "pane-id-copy.copy"
+description = "copy this pane's id to the clipboard"

@@ -12,9 +12,10 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - ブランチ作業は **gwq** の worktree（`~/workspace/worktree/...=<branch>`）で行う。
 - zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開き、そのペインで Claude Code を起動するところまで一発でやる（`zsh/gwq-herdr.zsh`）。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
-- ローカルプラグイン2つがサイドバーの使い勝手を補完する:
+- ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
+  - **pane-id-copy**: 今いるペインの `pane_id` をクリップボードへ入れる（`prefix+shift+c`）。他のペインのエージェントに「このペインを見て」と伝えるときの識別子
 
 ## ファイル対応表
 
@@ -24,6 +25,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
 | `herdr/plugins/local/pane-title-sync/` | `~/.config/herdr/plugins/local/pane-title-sync/` |
+| `herdr/plugins/local/pane-id-copy/` | `~/.config/herdr/plugins/local/pane-id-copy/` |
 | `zsh/gwq-herdr.zsh` | 任意の場所に置き `.zshrc` から `source` |
 | `git/hooks/reference-transaction` | `~/.config/git/hooks/reference-transaction`（要 `chmod +x`） |
 | `git/workspace.gitconfig` | `~/.config/git/workspace.gitconfig` |
@@ -97,7 +99,7 @@ install -m 755 herdr/bin/new-workspace-picker.sh ~/.config/herdr/bin/
 - prefix は `ctrl+a`
 - サイドバーを広め（幅40）にして日本語の会話タイトルを1行目に表示。`$act` トークン（後述の Claude hooks が報告）で「今やっている操作」を2行目に出す
 - `[ui.toast] delivery = "system"` でバックグラウンド workspace の状態変化を OS 通知に
-- キーバインド: `prefix+shift+n`（workspace picker）, `prefix+t`（navigator）, `prefix+d`（reviewr）, `prefix+shift+a`（agents 絞り込みトグル）, `prefix+shift+b`（terminal-browser）, `ctrl+shift+u` / `ctrl+shift+m`（usagebar）
+- キーバインド: `prefix+shift+n`（workspace picker）, `prefix+t`（navigator）, `prefix+d`（reviewr）, `prefix+shift+a`（agents 絞り込みトグル）, `prefix+shift+c`（ペインIDコピー）, `prefix+shift+b`（terminal-browser）, `ctrl+shift+u` / `ctrl+shift+m`（usagebar）
 
 ### 6. Herdr プラグイン
 
@@ -107,8 +109,10 @@ install -m 755 herdr/bin/new-workspace-picker.sh ~/.config/herdr/bin/
 mkdir -p ~/.config/herdr/plugins/local
 cp -R herdr/plugins/local/agent-view-space ~/.config/herdr/plugins/local/
 cp -R herdr/plugins/local/pane-title-sync  ~/.config/herdr/plugins/local/
+cp -R herdr/plugins/local/pane-id-copy     ~/.config/herdr/plugins/local/
 herdr plugin link ~/.config/herdr/plugins/local/agent-view-space
 herdr plugin link ~/.config/herdr/plugins/local/pane-title-sync
+herdr plugin link ~/.config/herdr/plugins/local/pane-id-copy
 ```
 
 GitHub プラグイン（同梱しない。`herdr plugin install` で取得）:
@@ -125,6 +129,10 @@ herdr plugin install zenbu-labs/terminal-browser  # ターミナル内ブラウ�
 #### agent-view-space の背景（重要な知見）
 
 Herdr 0.8.2 では config の `agent_panel_scope` は**効かない**（パーサに残っているだけの死にキー）。agents ペインの絞り込みは socket API `agent.view.set` で行うが、これは**ランタイム状態でサーバ再起動で消える**。そこでこのプラグインが `[[startup]]` フックで毎回張り直し、`prefix+shift+a` でトグルできるようにしている。API は `~/.config/herdr/herdr.sock` に JSON を 1 行投げる方式（`bin/lib.sh` 参照）。
+
+#### pane-id-copy の背景
+
+「このペインを他のペイン（エージェント）から指したい」ときの識別子は `pane_id`（例 `w9:pB`）。Herdr 0.8.2 の socket API にはクリップボード書き込みがなく、右クリックのペインメニュー（Rename / Split / Close 等）も固定で拡張できない。そこでプラグインアクションとして実装し、`HERDR_PANE_ID`→context JSON の `focused_pane_id`→フォーカス中ペインの順で対象を解決して `pbcopy` に流している。`copy-target` アクションは `herdr pane read <id>` 等のコマンド例付きでコピーする。
 
 #### pane-title-sync の背景
 
