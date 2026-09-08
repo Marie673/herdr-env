@@ -4,6 +4,16 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 
 ---
 
+## 外部待ちは herdr に印を立てる
+
+`HERDR_ENV=1` のとき、herdr のサイドバーはエージェントの状態を idle / done としか表示できない。「用が終わって手空き」と「外部の返事を待っているだけ」が同じ見た目になるので、待ちに入ったら明示的に印を立てる（`herdr/bin/herdr-wait.sh` を `~/.local/bin/herdr-wait` から呼べるようにしておく）。
+
+- CodeRabbit のレビュー、CI、デプロイ、他エージェントの返答など、**こちらでは進められない外部の返事を待つ状態に入ったら** `herdr-wait set "<何を待っているか>"` を実行する（例: `herdr-wait set "CodeRabbit レビュー待ち #123"`）。応答を終える直前に実行する。
+- 待ちが解けたら（レビューが届いた / CI が緑になった / 待つのをやめた）**必ず** `herdr-wait clear` を実行する。
+- 印が立っている間、サイドバーの状態表示は「⏳ 外部待ち」、活動行は「⏳ <ラベル> <経過時間>」になる。
+- 印は6時間で自動失効するので、消し忘れが居座ることはない。
+- `HERDR_ENV=1` でない環境では何もしなくてよい。
+
 ## Repository management with ghq
 
 - Use `ghq root` to find the managed repository root and `ghq list -p` to list absolute repository paths.

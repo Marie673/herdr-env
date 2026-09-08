@@ -12,6 +12,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - ブランチ作業は **gwq** の worktree（`~/workspace/worktree/...=<branch>`）で行う。
 - zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開き、そのペインで Claude Code を起動するところまで一発でやる（`zsh/gwq-herdr.zsh`）。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
+- **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
@@ -23,6 +24,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 |---|---|
 | `herdr/config.toml` | `~/.config/herdr/config.toml` |
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
+| `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
 | `herdr/plugins/local/pane-title-sync/` | `~/.config/herdr/plugins/local/pane-title-sync/` |
 | `herdr/plugins/local/pane-id-copy/` | `~/.config/herdr/plugins/local/pane-id-copy/` |
@@ -92,6 +94,8 @@ echo 'source ~/workspace/github.com/Marie673/herdr-env/zsh/gwq-herdr.zsh' >> ~/.
 mkdir -p ~/.config/herdr/bin
 cp herdr/config.toml ~/.config/herdr/
 install -m 755 herdr/bin/new-workspace-picker.sh ~/.config/herdr/bin/
+install -m 755 herdr/bin/herdr-wait.sh ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/herdr-wait.sh ~/.local/bin/herdr-wait
 ```
 
 `config.toml` の要点:
@@ -153,6 +157,20 @@ install -m 755 claude/hooks/herdr-activity.sh ~/.claude/hooks/
 ```
 
 そして `claude/settings-hooks.snippet.json` の `hooks` を `~/.claude/settings.json` にマージする。これで Herdr サイドバーの `$act` トークンに「`$ git diff`」「読 foo.py」「編集 bar.ts」のような操作内容がリアルタイムで出る。状態ラベル（`✅ 完了 未確認` など）も同フックが差し替える。
+
+#### 外部待ちの可視化（herdr-wait）
+
+Herdr は Claude Code のペイン状態を `idle` / `done` としか報告できない。そのため「用が終わって手空き」と「CodeRabbit のレビューを待っているだけ」がサイドバー上で同じに見える。`agent.report-agent` による状態の上書きは公式エージェント（Claude Code）では効かないので、**状態ラベルの文言そのものを差し替える**方式にしている。
+
+```sh
+herdr-wait set "CodeRabbit レビュー待ち #123"   # 印を立てる
+herdr-wait clear                                 # 外す
+herdr-wait list                                  # 印が立っている全ペイン
+```
+
+印が立っている間、`state_text` は `⏳ 外部待ち`、`$act` は `⏳ <ラベル> <経過時間>` になる。印は `~/.local/state/herdr-wait/<pane_id>` に置かれ、6時間（`HERDR_WAIT_TTL`）で自動失効する。`herdr-activity.sh` が Stop フックのたびに読みに行くので、待ちの間に応答が終わっても表示が「待機」に戻らない。
+
+印の付け外しは Claude 自身にやらせる。`claude/CLAUDE.snippet.md` の「外部待ちは herdr に印を立てる」がその指示。
 
 最後に Herdr スキルを Claude Code に入れる:
 

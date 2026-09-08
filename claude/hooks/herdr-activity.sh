@@ -18,9 +18,16 @@ if printf '%s' "$input" | jq -e 'has("agent_id") and (.agent_id != null)' >/dev/
   exit 0
 fi
 
+# 外部待ち（CodeRabbit のレビュー、CI 等）の印。立っていれば idle / done の見え方を差し替える。
+# 印は herdr-wait が張り、TTL 切れなら空が返る。
+wait_label=""
+if [ -x "$HOME/.config/herdr/bin/herdr-wait.sh" ]; then
+  wait_label="$("$HOME/.config/herdr/bin/herdr-wait.sh" label 2>/dev/null)"
+fi
+
 case "$action" in
   prompt) act="考え中…" ;;
-  stop)   act="待機中" ;;
+  stop)   act="${wait_label:-待機中}" ;;
   notify) act="要確認" ;;
   clear)
     herdr pane report-metadata "$HERDR_PANE_ID" \
@@ -55,13 +62,27 @@ esac
 
 [ -n "$act" ] || exit 0
 
+# 待ち中は、ツール実行の表示にも ⏳ を付けて「まだ用事が終わっていない」と分かるようにする。
+if [ -n "$wait_label" ] && [ "$action" = "tool" ]; then
+  act="⏳ $act"
+fi
+
+# 待ち中の idle / done は「もう用は無い」ではなく「外部の返事待ち」。文言を差し替える。
+if [ -n "$wait_label" ]; then
+  label_done="⏳ 外部待ち"
+  label_idle="⏳ 外部待ち"
+else
+  label_done="✅ 完了 未確認"
+  label_idle="待機"
+fi
+
 # herdr のテーマには状態別の色トークンが無く、idle と done を色で分けられない。
 # 代わりに状態の表示文字そのものを差し替えて見分けられるようにする。
 herdr pane report-metadata "$HERDR_PANE_ID" \
   --source custom:activity --applies-to-source herdr:claude \
   --token act="$act" \
-  --state-label done="✅ 完了 未確認" \
-  --state-label idle="待機" \
+  --state-label done="$label_done" \
+  --state-label idle="$label_idle" \
   --state-label working="… 実行中" \
   --state-label blocked="⚠ 要承認" \
   --state-label unknown="? 不明" >/dev/null 2>&1
