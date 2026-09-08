@@ -121,7 +121,7 @@ ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
 ```
 
 ```sh
-wt-audit --list     # 一覧だけ
+wt-audit --list     # 一覧だけ（既定で ghq が知っている全リポジトリが対象）
 wt-audit            # fzf で選んで、space を閉じてワークツリーを削除
 wt-audit --auto --dry-run   # 自動で片付ける対象を確認
 ```

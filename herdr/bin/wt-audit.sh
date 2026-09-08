@@ -9,8 +9,7 @@
 #   wt-audit --json          機械可読な一覧
 #
 # オプション:
-#   --repo <path>       対象リポジトリ（既定: カレント）
-#   --all-repos         ghq が知っている全リポジトリを対象にする（カレントが repo 外なら既定）
+#   --repo <path>       このリポジトリだけを対象にする（既定: ghq が知っている全リポジトリ）
 #   --delete-branch     ワークツリーに加えてローカルブランチも消す
 #   --stale-days <N>    PR が無いワークツリーを「放置」とみなす日数（既定 30）
 #   --yes               対話の確認を飛ばす
@@ -45,7 +44,7 @@ while [ $# -gt 0 ]; do
     --yes|-y) ASSUME_YES=1; shift ;;
     --stale-days) STALE_DAYS="${2:-30}"; shift 2 ;;
     --repo) REPO_ARG="${2:-}"; shift 2 ;;
-    --all-repos) ALL_REPOS=1; shift ;;
+    --all-repos) ALL_REPOS=1; shift ;;  # 既定なので何もしない（後方互換）
     -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "wt-audit: 不明なオプション: $1" >&2; exit 2 ;;
   esac
@@ -58,19 +57,14 @@ done
 now=$(date +%s)
 
 # ---- 1. worktree 一覧 -------------------------------------------------------
-# gwq list -g はディスク上の全ワークツリーを見る。--repo が効いていればそこだけ。
+# 既定は「ghq が知っている全リポジトリ」。棚卸しは全体像が要るし、
+# カレントリポジトリに worktree が無いと空振りして分かりにくいため。
+# --repo で 1 リポジトリに絞れる。
 if [ -n "$REPO_ARG" ]; then
   worktrees_json=$(cd "$REPO_ARG" && gwq list --json 2>/dev/null)
-elif [ "$ALL_REPOS" = 1 ]; then
+else
   # gwq list -g はベースディレクトリ全体を舐めて 1 分以上かかる。
   # ghq が知っているリポジトリごとに引けば 1 件 0.1 秒で済む。
-  worktrees_json=$(ghq list -p 2>/dev/null | while IFS= read -r r; do
-      (cd "$r" 2>/dev/null && gwq list --json 2>/dev/null)
-    done | jq -s 'map(select(. != null)) | add // []')
-elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  worktrees_json=$(gwq list --json 2>/dev/null)
-else
-  ALL_REPOS=1
   worktrees_json=$(ghq list -p 2>/dev/null | while IFS= read -r r; do
       (cd "$r" 2>/dev/null && gwq list --json 2>/dev/null)
     done | jq -s 'map(select(. != null)) | add // []')
