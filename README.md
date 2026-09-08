@@ -147,7 +147,10 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.marie673.wt-audit.pl
 
 片付けたときは herdr の通知が出る。ログは `~/.local/state/wt-audit/audit.log`。止めるときは `launchctl bootout gui/$(id -u)/dev.marie673.wt-audit`。
 
-実装上の注意: `gwq list -g` と `gwq remove -g` はベースディレクトリ全体を舐めるため1分以上かかる。`wt-audit` は必ず本体リポジトリの中から `gwq` を呼び、リポジトリの列挙は `ghq list -p` で行っている。
+実装上の注意:
+
+- `gwq list -g` と `gwq remove -g` はベースディレクトリ全体を舐めるため1分以上かかる。`wt-audit` は必ず本体リポジトリの中から `gwq` を呼び、リポジトリの列挙は `ghq list -p` で行っている。
+- `gwq list` は**ベースディレクトリを共有するリポジトリすべてで同じ一覧を返す**。全リポジトリを舐めると同じワークツリーがリポジトリ数だけ重複するので、`path` で一意化している（しないと 40 件が 1486 件になり、棚卸しに15分以上かかる）。全リポジトリ対象でも26秒程度で終わる。
 
 ### 6. Herdr プラグイン
 

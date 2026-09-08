@@ -77,8 +77,10 @@ else
 fi
 [ -n "$worktrees_json" ] || { echo "wt-audit: ワークツリーが取れませんでした" >&2; exit 1; }
 
-# 本体リポジトリは棚卸し対象外
-worktrees=$(printf '%s' "$worktrees_json" | jq -c '[.[] | select(.is_main != true) | {branch, path}] | sort_by(.branch) | .[]')
+# 本体リポジトリは棚卸し対象外。
+# gwq list は同じベースディレクトリを共有するリポジトリすべてで同じ一覧を返すため、
+# 全リポジトリを舐めると同じワークツリーが repo 数だけ重複する。path で一意化する。
+worktrees=$(printf '%s' "$worktrees_json" | jq -c '[.[] | select(.is_main != true) | {branch, path}] | unique_by(.path) | sort_by(.branch) | .[]')
 [ -n "$worktrees" ] || { echo "対象のワークツリーはありません。"; exit 0; }
 
 # ---- 2. herdr の space（あれば） -------------------------------------------
