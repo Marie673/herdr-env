@@ -37,7 +37,6 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `claude/settings-hooks.snippet.json` | `~/.claude/settings.json` の `hooks` にマージ |
 | `claude/skills/herdr/SKILL.md` | `~/.claude/skills/herdr/SKILL.md` |
 | `claude/CLAUDE.snippet.md` | `~/.claude/CLAUDE.md` に追記 |
-| `ghostty/config` | `~/.config/ghostty/config`（herdr を動かす外側のターミナル） |
 
 ## セットアップ手順
 
@@ -106,17 +105,6 @@ ln -sf ~/.config/herdr/bin/herdr-wait.sh ~/.local/bin/herdr-wait
 - サイドバーを広め（幅40）にして日本語の会話タイトルを1行目に表示。`$act` トークン（後述の Claude hooks が報告）で「今やっている操作」を2行目に出す
 - `[ui.toast] delivery = "system"` でバックグラウンド workspace の状態変化を OS 通知に
 - キーバインド: `prefix+shift+n`（workspace picker）, `prefix+t`（navigator）, `prefix+d`（reviewr）, `prefix+shift+a`（agents 絞り込みトグル）, `prefix+shift+c`（ペインIDコピー）, `prefix+shift+b`（terminal-browser）, `ctrl+shift+u` / `ctrl+shift+m`（usagebar）
-
-### 5.5. ターミナル（Ghostty）
-
-サイドバーの見た目（半透明の暗い背景、透過タイトルバー）は Herdr ではなく外側のターミナル側の設定。Ghostty 本体は Homebrew ではなく公式配布物を直接入れている（Brewfile には含めていない）。
-
-```sh
-mkdir -p ~/.config/ghostty
-cp ghostty/config ~/.config/ghostty/config
-```
-
-フォントは指定していない（Ghostty の既定のまま）。配色は Herdr 側の `[theme] name = "tokyo-night"`、行の状態記号は `status_indicators = "symbols"`、spaces の行構成は `[ui.sidebar.spaces]` が決めている。worktree が repo 配下にツリー表示されるのは Herdr の組み込み動作で、`gwt`（= `herdr worktree open`）でワークスペースを作っていれば自動でそうなる。設定項目は無い。
 
 ### 6. Herdr プラグイン
 
