@@ -13,6 +13,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開き、そのペインで Claude Code を起動するところまで一発でやる（`zsh/gwq-herdr.zsh`）。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
+- **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
@@ -25,6 +26,8 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/config.toml` | `~/.config/herdr/config.toml`（テーマ名は空。好みのものを入れる） |
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
+| `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
+| `launchd/dev.marie673.wt-audit.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
 | `herdr/plugins/local/pane-title-sync/` | `~/.config/herdr/plugins/local/pane-title-sync/` |
 | `herdr/plugins/local/pane-id-copy/` | `~/.config/herdr/plugins/local/pane-id-copy/` |
@@ -97,6 +100,8 @@ cp herdr/config.toml ~/.config/herdr/
 install -m 755 herdr/bin/new-workspace-picker.sh ~/.config/herdr/bin/
 install -m 755 herdr/bin/herdr-wait.sh ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/herdr-wait.sh ~/.local/bin/herdr-wait
+install -m 755 herdr/bin/wt-audit.sh ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
 ```
 
 `config.toml` の要点:
@@ -105,6 +110,44 @@ ln -sf ~/.config/herdr/bin/herdr-wait.sh ~/.local/bin/herdr-wait
 - サイドバーを広め（幅40）にして日本語の会話タイトルを1行目に表示。`$act` トークン（後述の Claude hooks が報告）で「今やっている操作」を2行目に出す
 - `[ui.toast] delivery = "system"` でバックグラウンド workspace の状態変化を OS 通知に
 - キーバインド: `prefix+shift+n`（workspace picker）, `prefix+t`（navigator）, `prefix+d`（reviewr）, `prefix+shift+a`（agents 絞り込みトグル）, `prefix+shift+c`（ペインIDコピー）, `prefix+shift+b`（terminal-browser）, `ctrl+shift+u` / `ctrl+shift+m`（usagebar）
+
+### 5.5. ワークツリーの棚卸し（wt-audit）
+
+`gwt` で作業を始めるたびにワークツリーが増える一方なので、終わったものを片付けるコマンド。PR の状態・作業の残り・herdr の space を突き合わせて判定する。
+
+```sh
+install -m 755 herdr/bin/wt-audit.sh ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
+```
+
+```sh
+wt-audit --list     # 一覧だけ
+wt-audit            # fzf で選んで、space を閉じてワークツリーを削除
+wt-audit --auto --dry-run   # 自動で片付ける対象を確認
+```
+
+判定は次の通り:
+
+| 判定 | 条件 |
+|---|---|
+| 片付け可 | PR が merged / closed、未コミット変更なし、未 push コミットなし |
+| 要確認 | 未コミット変更・未 push コミットあり、または PR が無く30日放置 |
+| 生存 | PR が open、または最近さわっている |
+
+`--auto` は「片付け可」だけを消す。未コミット変更・未 push コミットがあるもの、エージェントが working / blocked の space、本体リポジトリには決して触らない。**消すのはワークツリーのディレクトリだけで、ブランチは残る**（`--delete-branch` を付けたときのみ消す）ので、`gwt <branch>` で作り直せる。
+
+#### 自動で片付ける
+
+`launchd/dev.marie673.wt-audit.plist` を `~/Library/LaunchAgents/` に置くと30分ごとに `wt-audit --auto` が走る。パス（`/Users/okazaki/...`）は自分の環境に書き換えること。
+
+```sh
+cp launchd/dev.marie673.wt-audit.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.marie673.wt-audit.plist
+```
+
+片付けたときは herdr の通知が出る。ログは `~/.local/state/wt-audit/audit.log`。止めるときは `launchctl bootout gui/$(id -u)/dev.marie673.wt-audit`。
+
+実装上の注意: `gwq list -g` と `gwq remove -g` はベースディレクトリ全体を舐めるため1分以上かかる。`wt-audit` は必ず本体リポジトリの中から `gwq` を呼び、リポジトリの列挙は `ghq list -p` で行っている。
 
 ### 6. Herdr プラグイン
 

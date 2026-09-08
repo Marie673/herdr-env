@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  終わった作業のワークツリーを定期的に片付ける（wt-audit --auto）。
+  PR が merged/closed、未コミット変更なし、未 push コミットなし、
+  エージェントが動いていない space のものだけが対象。
+  ~/Library/LaunchAgents/ に置いて launchctl bootstrap で有効化する。
+  パスは環境に合わせて書き換えること（USERNAME 部分）。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.marie673.wt-audit</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>wt-audit --auto</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/okazaki/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- 30分ごと。ログイン直後には走らせない（RunAtLoad は付けない）。 -->
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/okazaki/.local/state/wt-audit/audit.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/okazaki/.local/state/wt-audit/audit.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+</dict>
+</plist>
