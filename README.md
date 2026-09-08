@@ -22,7 +22,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 
 | リポジトリ内 | 配置先 |
 |---|---|
-| `herdr/config.toml` | `~/.config/herdr/config.toml` |
+| `herdr/config.toml` | `~/.config/herdr/config.toml`（テーマ名は空。好みのものを入れる） |
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |

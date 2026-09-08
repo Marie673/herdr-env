@@ -1,8 +1,10 @@
 onboarding = false
 
 [theme]
-# Navigatorはこの明示設定を継承する。未指定だとNavigator側がOne Lightへフォールバックする。
-name = "tokyo-night"
+# テーマ（配色）は好みなので、このリポジトリでは共有しない。
+# name を明示すると Navigator もそれを継承する。未指定だと Navigator 側が
+# One Light へフォールバックするので、好きなテーマを name に入れておくとよい。
+# name = "tokyo-night"
 
 auto_switch = false
 [ui]
