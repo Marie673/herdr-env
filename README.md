@@ -109,7 +109,7 @@ ln -sf ~/.config/herdr/bin/herdr-wait.sh ~/.local/bin/herdr-wait
 
 ### 5.5. ターミナル（Ghostty）
 
-サイドバーの見た目（半透明の暗い背景、透過タイトルバー）は Herdr ではなく外側のターミナル側の設定。
+サイドバーの見た目（半透明の暗い背景、透過タイトルバー）は Herdr ではなく外側のターミナル側の設定。Ghostty 本体は Homebrew ではなく公式配布物を直接入れている（Brewfile には含めていない）。
 
 ```sh
 mkdir -p ~/.config/ghostty
