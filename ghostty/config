@@ -1,0 +1,11 @@
+macos-option-as-alt = true
+
+# Apple のダーク UI に馴染む、落ち着いた半透明の背景
+background = #1c1c1e
+foreground = #f2f2f7
+background-opacity = 0.82
+background-blur = macos-glass-regular
+macos-titlebar-style = transparent
+
+macos-auto-secure-input = false
+macos-secure-input-indication = false
