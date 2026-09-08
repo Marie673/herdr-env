@@ -85,7 +85,7 @@ push_state_labels() {
       --token act="$3" \
       --state-label done="⏳ 外部待ち" \
       --state-label idle="⏳ 外部待ち" \
-      --state-label working="… 実行中" \
+      --state-label working="⏳ 外部待ち" \
       --state-label blocked="⚠ 要承認" \
       --state-label unknown="? 不明" >/dev/null 2>&1
   else
@@ -153,6 +153,20 @@ case "$cmd" in
     started="${m%%	*}"
     label="${m#*	}"
     printf '⏳ %s %s' "$label" "$(elapsed_text $(( $(date +%s) - started )))"
+    ;;
+
+  statusline)
+    # Claude Code のステータスラインに出す1行。
+    # herdr の claude 検出マニフェストの live_turn_working ルール
+    #   line_regex = '^\s*[*·✢✶✻✽]\s+\S.*…(\s+\(\d+[smh][\s·]|\s*$)'   priority 970
+    # に合わせてあるので、この行が画面にある間ペインの状態は working になり、
+    # idle（live_prompt_box, priority 950）に落ちない。
+    # 先頭の `· ` と末尾の `…` は検出条件そのもの。崩すと働かなくなる。
+    pane="$(resolve_pane)" || exit 0
+    m="$(read_marker "$pane")" || exit 0
+    started="${m%%	*}"
+    label="${m#*	}"
+    printf '· ⏳ %s %s…' "$label" "$(elapsed_text $(( $(date +%s) - started )))"
     ;;
 
   list)

@@ -68,12 +68,16 @@ if [ -n "$wait_label" ] && [ "$action" = "tool" ]; then
 fi
 
 # 待ち中の idle / done は「もう用は無い」ではなく「外部の返事待ち」。文言を差し替える。
+# statusline の待ち行によって状態自体は working になるが、取りこぼしに備えて
+# idle / done 側の文言も待ち用にしておく。
 if [ -n "$wait_label" ]; then
   label_done="⏳ 外部待ち"
   label_idle="⏳ 外部待ち"
+  label_working="⏳ 外部待ち"
 else
   label_done="✅ 完了 未確認"
   label_idle="待機"
+  label_working="… 実行中"
 fi
 
 # herdr のテーマには状態別の色トークンが無く、idle と done を色で分けられない。
@@ -83,7 +87,7 @@ herdr pane report-metadata "$HERDR_PANE_ID" \
   --token act="$act" \
   --state-label done="$label_done" \
   --state-label idle="$label_idle" \
-  --state-label working="… 実行中" \
+  --state-label working="$label_working" \
   --state-label blocked="⚠ 要承認" \
   --state-label unknown="? 不明" >/dev/null 2>&1
 

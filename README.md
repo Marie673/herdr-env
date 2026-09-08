@@ -33,6 +33,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `git/workspace.gitconfig` | `~/.config/git/workspace.gitconfig` |
 | `gwq/config.toml` | `~/.config/gwq/config.toml` |
 | `claude/hooks/herdr-activity.sh` | `~/.claude/hooks/herdr-activity.sh`（要 `chmod +x`） |
+| `claude/statusline.sh` | `~/.claude/statusline.sh`（`settings.json` の `statusLine.command` から呼ぶ） |
 | `claude/settings-hooks.snippet.json` | `~/.claude/settings.json` の `hooks` にマージ |
 | `claude/skills/herdr/SKILL.md` | `~/.claude/skills/herdr/SKILL.md` |
 | `claude/CLAUDE.snippet.md` | `~/.claude/CLAUDE.md` に追記 |
@@ -160,7 +161,20 @@ install -m 755 claude/hooks/herdr-activity.sh ~/.claude/hooks/
 
 #### 外部待ちの可視化（herdr-wait）
 
-Herdr は Claude Code のペイン状態を `idle` / `done` としか報告できない。そのため「用が終わって手空き」と「CodeRabbit のレビューを待っているだけ」がサイドバー上で同じに見える。`agent.report-agent` による状態の上書きは公式エージェント（Claude Code）では効かないので、**状態ラベルの文言そのものを差し替える**方式にしている。
+Herdr は Claude Code のペイン状態を画面の見た目から判定する。レビュー待ちで応答が終わると `idle` になり、「用が終わって手空き」と区別がつかない。
+
+`pane.report-agent` による状態の上書きは**効かない**。Claude Code は公式の session-only エージェント扱いで、custom source からの lifecycle 報告は `{"result":{"type":"ok"}}` を返しつつ黙って捨てられる（herdr 0.8.2 / 上流 Discussion #3625）。
+
+そこで**検出マニフェストが working と読む行を、自分のステータスラインに出す**方式にしている。`agent-detection/remote/claude.toml` の `live_turn_working`（priority 970）は
+
+```
+line_regex = ['^\s*[*·✢✶✻✽]\s+\S.*…(?:\s+\(\d+[smh](?:\s|·)|\s*$)']
+region = "bottom_non_empty_lines(12)"
+```
+
+にマッチする行を working と判定する。`herdr-wait statusline` はこの形の1行（`· ⏳ CodeRabbit レビュー待ち 12分…`）を出し、`claude/statusline.sh` が待ち中だけそれを描画する。結果、待っている間はペインが idle（`live_prompt_box`, priority 950）に落ちず working のままになる。承認ダイアログ系（priority 980）は上位なので、待ち中でも `⚠ 要承認` が優先される。
+
+マニフェストを上書き（`~/.config/herdr/agent-detection/claude.toml`）する手もあるが、ローカル上書きは remote 版を丸ごと shadow するため claude の検出ルールが古いまま固定される。ステータスライン方式ならマニフェストは公式のまま追従できる。
 
 ```sh
 herdr-wait set "CodeRabbit レビュー待ち #123"   # 印を立てる
@@ -168,7 +182,7 @@ herdr-wait clear                                 # 外す
 herdr-wait list                                  # 印が立っている全ペイン
 ```
 
-印が立っている間、`state_text` は `⏳ 外部待ち`、`$act` は `⏳ <ラベル> <経過時間>` になる。印は `~/.local/state/herdr-wait/<pane_id>` に置かれ、6時間（`HERDR_WAIT_TTL`）で自動失効する。`herdr-activity.sh` が Stop フックのたびに読みに行くので、待ちの間に応答が終わっても表示が「待機」に戻らない。
+印は `~/.local/state/herdr-wait/<pane_id>` に置かれ、6時間（`HERDR_WAIT_TTL`）で自動失効する。状態が working になるのに加えて、`herdr-activity.sh` が state_text を `⏳ 外部待ち`、`$act` を `⏳ <ラベル> <経過時間>` に差し替える。
 
 印の付け外しは Claude 自身にやらせる。`claude/CLAUDE.snippet.md` の「外部待ちは herdr に印を立てる」がその指示。
 
