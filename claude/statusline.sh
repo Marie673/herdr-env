@@ -160,5 +160,11 @@ fi
 # この1行を出しておくと待っている間ペインが idle に落ちない（herdr-wait 参照）。
 if [ -x "$HOME/.config/herdr/bin/herdr-wait.sh" ]; then
   wait_line=$("$HOME/.config/herdr/bin/herdr-wait.sh" statusline 2>/dev/null)
-  [ -n "$wait_line" ] && printf '%s\n' "$wait_line"
+  if [ -n "$wait_line" ]; then
+    printf '%s\n' "$wait_line"
+  fi
 fi
+
+# 終了コードが 0 以外だと Claude Code はステータスラインを空表示にするため、
+# 直前の判定結果に関係なく 0 で終える。
+exit 0
