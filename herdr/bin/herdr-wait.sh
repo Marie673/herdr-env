@@ -7,12 +7,15 @@
 #
 # 使い方:
 #   herdr-wait set "CodeRabbit レビュー待ち"   … 印を立てる（--pane で他ペインも指定可）
+#   herdr-wait set --pid <PID> "CI 待ち"       … PID のプロセスが生きている間だけ有効な印
 #   herdr-wait clear                           … 印を外す
+#   herdr-wait clear --if-pid <PID>            … その PID で立てた印のときだけ外す
 #   herdr-wait status                          … このペインの印を出す（無ければ終了コード1）
 #   herdr-wait label                           … サイドバー用の1行（経過時間つき）。無ければ空
 #   herdr-wait list                            … 印が立っている全ペイン
 #
 # 印は TTL（既定6時間）を過ぎると自動で無効になる。消し忘れても居座らない。
+# --pid 付きの印は、そのプロセスが終わった時点でも無効になる（監視ループが死んでも残らない）。
 
 set -u
 
@@ -20,7 +23,7 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-wait"
 TTL_SECONDS="${HERDR_WAIT_TTL:-21600}"
 
 usage() {
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 resolve_pane() {
@@ -55,10 +58,21 @@ elapsed_text() {
   fi
 }
 
+# 印に結びついた PID（2行目の "pid <N>"）。無ければ空。
+marker_pid() {
+  sed -n '2s/^pid //p' "$1" 2>/dev/null
+}
+
 # 印が有効なら "開始epoch<TAB>ラベル" を出す。期限切れなら消して何も出さない。
 read_marker() {
   _f="$(marker_path "$1")"
   [ -f "$_f" ] || return 1
+  _pid="$(marker_pid "$_f")"
+  if [ -n "$_pid" ] && ! kill -0 "$_pid" 2>/dev/null; then
+    # 待っていたプロセスがもういない。待ちは終わっている
+    rm -f "$_f"
+    return 1
+  fi
   _line="$(head -n 1 "$_f" 2>/dev/null)" || return 1
   _started="${_line%%	*}"
   _label="${_line#*	}"
@@ -104,6 +118,8 @@ cmd="${1:-}"
 [ $# -gt 0 ] && shift
 
 OPT_PANE=""
+OPT_PID=""
+OPT_IF_PID=""
 args=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -114,6 +130,14 @@ while [ $# -gt 0 ]; do
     --pane=*)
       OPT_PANE="${1#--pane=}"
       shift
+      ;;
+    --pid)
+      OPT_PID="${2:-}"
+      shift 2 || break
+      ;;
+    --if-pid)
+      OPT_IF_PID="${2:-}"
+      shift 2 || break
       ;;
     *)
       if [ -z "$args" ]; then args="$1"; else args="$args $1"; fi
@@ -127,14 +151,26 @@ case "$cmd" in
     pane="$(resolve_pane)" || { echo "herdr-wait: ペインを特定できません（--pane を指定してください）" >&2; exit 1; }
     label="${args:-外部待ち}"
     mkdir -p "$STATE_DIR"
-    printf '%s\t%s\n' "$(date +%s)" "$label" > "$(marker_path "$pane")"
+    case "$OPT_PID" in
+      *[!0-9]*) echo "herdr-wait: --pid は数値で指定してください: $OPT_PID" >&2; exit 1 ;;
+    esac
+    {
+      printf '%s\t%s\n' "$(date +%s)" "$label"
+      [ -n "$OPT_PID" ] && printf 'pid %s\n' "$OPT_PID"
+    } > "$(marker_path "$pane")"
     push_state_labels "$pane" 1 "⏳ $label"
     echo "waiting: $pane — $label"
     ;;
 
   clear)
     pane="$(resolve_pane)" || { echo "herdr-wait: ペインを特定できません（--pane を指定してください）" >&2; exit 1; }
-    rm -f "$(marker_path "$pane")"
+    f="$(marker_path "$pane")"
+    if [ -n "$OPT_IF_PID" ] && [ -f "$f" ] && [ "$(marker_pid "$f")" != "$OPT_IF_PID" ]; then
+      # 別の待ち（手で立てた CodeRabbit 待ち等）に置き換わっている。消さない
+      echo "kept: ${pane}（別の印）"
+      exit 0
+    fi
+    rm -f "$f"
     push_state_labels "$pane" 0 ""
     echo "cleared: $pane"
     ;;

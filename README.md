@@ -13,6 +13,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開き、そのペインで Claude Code を起動するところまで一発でやる（`zsh/gwq-herdr.zsh`）。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
+- **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
 - **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
@@ -26,6 +27,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/config.toml` | `~/.config/herdr/config.toml`（テーマ名は空。好みのものを入れる） |
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
+| `herdr/bin/gh-ci-wait.sh` | `~/.config/herdr/bin/gh-ci-wait.sh` + `~/.local/bin/gh-ci-wait` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
 | `launchd/dev.marie673.wt-audit.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
@@ -100,6 +102,8 @@ cp herdr/config.toml ~/.config/herdr/
 install -m 755 herdr/bin/new-workspace-picker.sh ~/.config/herdr/bin/
 install -m 755 herdr/bin/herdr-wait.sh ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/herdr-wait.sh ~/.local/bin/herdr-wait
+install -m 755 herdr/bin/gh-ci-wait.sh ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/gh-ci-wait.sh ~/.local/bin/gh-ci-wait
 install -m 755 herdr/bin/wt-audit.sh ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
 ```
@@ -224,13 +228,32 @@ region = "bottom_non_empty_lines(12)"
 
 ```sh
 herdr-wait set "CodeRabbit レビュー待ち #123"   # 印を立てる
+herdr-wait set --pid 1234 "CI 待ち"             # PID 1234 が生きている間だけ有効な印
 herdr-wait clear                                 # 外す
+herdr-wait clear --if-pid 1234                   # PID 1234 で立てた印のときだけ外す
 herdr-wait list                                  # 印が立っている全ペイン
 ```
 
 印は `~/.local/state/herdr-wait/<pane_id>` に置かれ、6時間（`HERDR_WAIT_TTL`）で自動失効する。状態が working になるのに加えて、`herdr-activity.sh` が state_text を `⏳ 外部待ち`、`$act` を `⏳ <ラベル> <経過時間>` に差し替える。
 
 印の付け外しは Claude 自身にやらせる。`claude/CLAUDE.snippet.md` の「外部待ちは herdr に印を立てる」がその指示。
+
+#### CI 待ち（gh-ci-wait）
+
+Claude に CI を待たせると、その場で `until [ "$(gh run list …)" = 0 ]; do sleep; done` を書いて裏で回しがちで、次の理由でペインが working のまま居座る。
+
+- `gh` が一度でも失敗すると空文字になり、`= 0` が成り立たず永久に回る。上限時間も無い。
+- push 直後は PR の head が古く、前のコミットの完了済みの結果を見て即終了する（逆に待ちたい結果を取りこぼす）。
+- 待ち印を手で `set` / `clear` するので、ループが終わっても死んでも印が残り、ステータスラインの `· ⏳ …` 行で working 判定が続く。
+
+`gh-ci-wait <PR番号>` はこれを塞ぐ。
+
+- 待ちたい SHA（今のブランチが PR のブランチで push 済みならローカルの HEAD）が PR の head になるのを待ってから、`gh pr checks --json` の `bucket` を見る。checks が出始めてから60秒は待ち、pending 0 を2回続けて見て終わる（後から登録されるワークフローの取りこぼし対策）。
+- `gh` の失敗は6回連続までは流す。全体に上限（既定60分）。head が進んだら（新しい push）exit 4 で終わる。
+- 待ち印は `herdr-wait set --pid $$` で立て、`trap … EXIT` で `clear --if-pid $$` する。kill -9 でも、`herdr-wait` 側が PID の生存を見て印を無効にする。
+- 終了コード: 0 成功 / 1 失敗・キャンセルあり / 2 時間切れ / 3 gh の失敗が続いた / 4 checks が出ない・head が合わない・head が進んだ。
+
+Claude には Bash の `run_in_background: true` で起動させ、完了の task-notification で再開させる（`claude/CLAUDE.snippet.md` の「GitHub Actions / PR の CI を待つときは `gh-ci-wait`」）。
 
 最後に Herdr スキルを Claude Code に入れる:
 
