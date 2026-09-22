@@ -146,29 +146,55 @@ function _gwt_path() {
 }
 
 # gwt: gwq + herdr の作業開始コマンド。
-#   gwt <branch> [--no-agent] [--no-focus]
+#   gwt <branch> [--task "<引き継ぎ文>"|--task-file <path>] [--no-agent] [--no-focus]
 # ワークツリーを用意し、herdr の workspace として開いて Claude Code を起動する。
 # 本体リポジトリ(main/master)はブランチ切り替えを禁止しているので、作業は必ずこの入口から始める。
 # herdr の外で実行した場合は、ワークツリーへ cd するだけ。
+#
+# --task を渡すと、起動した agent への最初の指示としてそれを投げ、同時に「誰に何を
+# 任せたか」を gwt-tasks の台帳へ記録する。herdr は agent の状態しか持たないので、
+# 依頼の内容と依頼元は台帳側で持つ。起動側はブロックせず、以後の追跡は
+# `gwt-tasks` と `gwt-tasks show <agent>` で行う。
 function gwt() {
-    local branch="" start_agent=1 focus=1 arg
-    for arg in "$@"; do
-        case "$arg" in
-            --no-agent) start_agent=0 ;;
-            --no-focus) focus=0 ;;
-            -*) echo "gwt: 不明なオプション: ${arg}" >&2; return 2 ;;
+    local branch="" start_agent=1 focus=1 task="" task_file=""
+    while (( $# )); do
+        case "$1" in
+            --no-agent) start_agent=0; shift ;;
+            --no-focus) focus=0; shift ;;
+            --task)
+                (( $# >= 2 )) || { echo "gwt: --task には引き継ぎ文が必要です" >&2; return 2; }
+                task="$2"; shift 2 ;;
+            --task=*) task="${1#--task=}"; shift ;;
+            --task-file)
+                (( $# >= 2 )) || { echo "gwt: --task-file にはパスが必要です" >&2; return 2; }
+                task_file="$2"; shift 2 ;;
+            --task-file=*) task_file="${1#--task-file=}"; shift ;;
+            -*) echo "gwt: 不明なオプション: $1" >&2; return 2 ;;
             *)
                 if [[ -z "${branch}" ]]; then
-                    branch="$arg"
+                    branch="$1"
                 else
-                    echo "gwt: 引数が多すぎます: ${arg}" >&2
+                    echo "gwt: 引数が多すぎます: $1" >&2
                     return 2
                 fi
-                ;;
+                shift ;;
         esac
     done
     if [[ -z "${branch}" ]]; then
-        echo "usage: gwt <branch> [--no-agent] [--no-focus]" >&2
+        echo "usage: gwt <branch> [--task \"<引き継ぎ文>\"|--task-file <path>] [--no-agent] [--no-focus]" >&2
+        return 2
+    fi
+    if [[ -n "${task}" && -n "${task_file}" ]]; then
+        echo "gwt: --task と --task-file は同時に指定できません" >&2
+        return 2
+    fi
+    if [[ -n "${task_file}" ]]; then
+        [[ -r "${task_file}" ]] || { echo "gwt: 読めません: ${task_file}" >&2; return 2; }
+        task="$(<"${task_file}")"
+        [[ -n "${task}" ]] || { echo "gwt: 引き継ぎ文が空です: ${task_file}" >&2; return 2; }
+    fi
+    if [[ -n "${task}" ]] && (( ! start_agent )); then
+        echo "gwt: --no-agent では依頼を渡せません" >&2
         return 2
     fi
 
@@ -210,12 +236,16 @@ function gwt() {
     [[ "${name}" == [a-z]* ]] || name="w-${name}"
     name="${name[1,32]}"
 
+    local ready=0
     if (( start_agent )); then
         if [[ "${already}" == "true" ]] && herdr agent get "${name}" > /dev/null 2>&1; then
             echo "gwt: 既存の agent '${name}' を再利用します"
+            ready=1
         else
             local start_out
-            if ! start_out=$(herdr agent start "${name}" --kind claude --pane "${pane}" 2>&1); then
+            if start_out=$(herdr agent start "${name}" --kind claude --pane "${pane}" 2>&1); then
+                ready=1
+            else
                 if [[ "${start_out}" != *agent_not_ready* ]]; then
                     print -r -- "${start_out}" >&2
                     return 1
@@ -224,11 +254,18 @@ function gwt() {
                 # Claude Code の初回フォルダ信頼プロンプトだけは自動で通す。
                 if herdr agent read "${name}" --source detection --lines 40 2>/dev/null | grep -q "I trust this folder"; then
                     herdr agent send-keys "${name}" enter > /dev/null 2>&1
-                    herdr agent wait "${name}" --until idle --timeout 30000 > /dev/null 2>&1
+                    herdr agent wait "${name}" --until idle --timeout 30000 > /dev/null 2>&1 && ready=1
                 else
                     echo "gwt: agent '${name}' が入力待ちです。workspace ${workspace} を開いて確認してください。" >&2
                 fi
             fi
+        fi
+
+        # 起動側に依頼を残す。agent が落ちても台帳は残るので、任せた仕事が
+        # 「誰も見ていないまま消える」ことがなくなる。
+        if command -v gwt-tasks > /dev/null 2>&1; then
+            gwt-tasks add --agent "${name}" --branch "${branch}" --worktree "${worktree}" \
+                --workspace "${workspace}" --pane "${pane}" --task "${task}" > /dev/null
         fi
     fi
     (( focus )) && herdr workspace focus "${workspace}" > /dev/null
@@ -237,4 +274,14 @@ function gwt() {
     (( start_agent )) && summary+=", agent ${name}"
     summary+=")"
     echo "${summary}"
+
+    if [[ -n "${task}" ]]; then
+        if (( ! ready )); then
+            echo "gwt: agent が入力待ちのため依頼は渡していません（台帳には残してあります）" >&2
+        elif herdr agent prompt "${name}" "${task}" > /dev/null 2>&1; then
+            echo "gwt: 依頼を渡しました"
+        else
+            echo "gwt: 依頼を渡せませんでした。workspace ${workspace} で直接渡してください。" >&2
+        fi
+    fi
 }

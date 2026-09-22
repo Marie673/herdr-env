@@ -14,6 +14,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
+- **`gwt-tasks`** が「別 space の誰に何を任せたか」の台帳を持ち、herdr の状態と突き合わせて一覧にする（`herdr/bin/gwt-tasks.py`）。
 - **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
@@ -28,6 +29,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
 | `herdr/bin/gh-ci-wait.sh` | `~/.config/herdr/bin/gh-ci-wait.sh` + `~/.local/bin/gh-ci-wait` へ symlink |
+| `herdr/bin/gwt-tasks.py` | `~/.config/herdr/bin/gwt-tasks.py` + `~/.local/bin/gwt-tasks` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
 | `launchd/dev.marie673.wt-audit.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
@@ -106,6 +108,8 @@ install -m 755 herdr/bin/gh-ci-wait.sh ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/gh-ci-wait.sh ~/.local/bin/gh-ci-wait
 install -m 755 herdr/bin/wt-audit.sh ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
+install -m 755 herdr/bin/gwt-tasks.py ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/gwt-tasks.py ~/.local/bin/gwt-tasks
 ```
 
 `config.toml` の要点:
@@ -114,6 +118,43 @@ ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
 - サイドバーを広め（幅40）にして日本語の会話タイトルを1行目に表示。`$act` トークン（後述の Claude hooks が報告）で「今やっている操作」を2行目に出す
 - `[ui.toast] delivery = "system"` でバックグラウンド workspace の状態変化を OS 通知に
 - キーバインド: `prefix+shift+n`（workspace picker）, `prefix+t`（navigator）, `prefix+d`（reviewr）, `prefix+shift+a`（agents 絞り込みトグル）, `prefix+shift+c`（ペインIDコピー）, `prefix+shift+b`（terminal-browser）, `ctrl+shift+u` / `ctrl+shift+m`（usagebar）
+
+### 5.4. 任せた作業の台帳（gwt-tasks）
+
+`gwt` は worktree と workspace を作ってエージェントを起動するところまでしかやらない。起動した側には「誰に何を任せたか」が何も残らないので、切り出した作業を追いようがなかった。herdr が持っているのは agent の状態だけで、依頼の内容も依頼元も持っていない。
+
+```sh
+install -m 755 herdr/bin/gwt-tasks.py ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/gwt-tasks.py ~/.local/bin/gwt-tasks
+```
+
+```sh
+gwt feature/foo --task "issue #123 を実装。認証は既存の middleware を使う。PR まで。"
+gwt feature/foo --task-file ./handover.md   # 長い引き継ぎはファイルで
+
+gwt-tasks                    # 依頼の一覧
+gwt-tasks --mine             # 自分のペインから出した依頼だけ
+gwt-tasks show feature-foo   # 依頼の全文 + 委譲先の直近の返答
+gwt-tasks done feature-foo   # 済んだら台帳から外す
+gwt-tasks prune              # agent もワークツリーも無い依頼を掃除
+```
+
+```
+agent                           状態         タスク                                   経過       space
+ci-issue-1603-self-hosted-runne ⚠ 要承認     ランナー選択ワークフローを実装           22分       w1Q
+tf-refactor                     ✅ 完了      terraform の共有 Cloud Run をリファクタ  1時間12分  w1R
+feature-969-mt-image-upload     … 実行中     MT の画像アップロードを実装              4分        wT
+```
+
+設計:
+
+- **台帳は状態を持たない。** 状態の情報源は常に herdr（`herdr agent list`）。台帳は依頼の内容・依頼元・開始時刻だけを持ち、一覧のたびに突き合わせる。二重に状態を持つと必ず食い違う。
+- 1 依頼 1 ファイル（`~/.local/state/gwt-tasks/<agent>.json`）。並行して走る `gwt` が同じファイルを踏まない。
+- agent 名はペインの占有者が入れ替わると herdr 側で消えるので、名前で引けなければ `pane_id` で引き直す。どちらでも見つからなければ「✗ 不在」。
+- 外部待ちの印（`herdr-wait`）が立っているペインは、その印を優先して「⏳ 外部待ち」と出す。
+- 並びは手当てが要るものが上（要承認 → 完了 → 実行中 → 外部待ち → 待機 → 不明 → 不在）。
+
+**委譲先の返答は画面からではなくトランスクリプトから読む。** Claude Code は代替スクリーンで動くため、流れた行は herdr のホストスクロールバックに入らず `herdr agent read` では戻ってこない（`--lines` を増やしても無駄）。`herdr agent list` の `agent_session.value` が Claude Code のセッション ID なので、`~/.claude/projects/*/<session-id>.jsonl` を直接読んで最後の assistant メッセージを出している。セッション ID は台帳に書き戻すので、**agent が終了した後でも「最後に何と言い残したか」が読める**。
 
 ### 5.5. ワークツリーの棚卸し（wt-audit）
 
@@ -273,7 +314,10 @@ cp claude/skills/herdr/SKILL.md ~/.claude/skills/herdr/
 ```sh
 # 本体リポジトリで:
 gwt feature/foo        # worktree 作成 → Herdr workspace → Claude 起動 まで一発
+gwt feature/foo --task "issue #123 を実装。PR まで。"   # 引き継ぎを渡して台帳に記録
 gwt feature/foo --no-agent   # Claude を起動しない
+gwt-tasks              # 別 space に任せた作業の一覧
+gwt-tasks show <agent> # 依頼の全文と委譲先の直近の返答
 dev                    # fzf でリポジトリ/worktree に移動
 wt                     # 現在のリポジトリの worktree に移動
 prefix+shift+n         # Herdr 内で workspace picker
@@ -294,3 +338,4 @@ prefix+shift+a         # agents ペインの「現在の space だけ / 全部�
 - `herdr-agent-state.sh` — Herdr のインテグレーション導入時に自動生成される（上書き管理される）
 - `plugins/github/` 配下 — `herdr plugin install` で再取得する
 - `agent-view-space/scope`, `pane-title-sync/state.json` — プラグインのランタイム状態
+- `~/.local/state/gwt-tasks/` — `gwt-tasks` の台帳（その環境で出した依頼そのもの）

@@ -44,8 +44,20 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 - Repositories under `~/workspace/github.com/` are the canonical checkouts and stay on `main` / `master`. A `reference-transaction` hook (`~/.config/git/hooks/reference-transaction`) aborts `git switch` / `git checkout` there, so never plan work that depends on switching branches in the canonical checkout.
 - To start branch work, run `gwt <branch>` from inside the canonical checkout. It creates the gwq worktree, opens it as a Herdr workspace, and starts Claude Code in that workspace's root pane.
 - Under Herdr (`HERDR_ENV=1`), do not continue branch work in the current workspace. Move the work to the workspace that `gwt` opened for the worktree.
+- When you are the one handing work off, pass the handover with `gwt <branch> --task "<引き継ぎ文>"` (or `--task-file <path>` when it is long). **You write the handover text**, not the user: fold in what you already found, the assumptions you are making, and what counts as done. Being given only a branch name does not excuse dropping the context.
+- `--task` sends that text to the new agent as its first prompt and records the request in the `gwt-tasks` ledger. It does not block; the launching side keeps working.
 - When running the steps yourself instead of `gwt`, keep the same order:
   1. `gwq add -b <branch>` (or `gwq add <branch>` for an existing branch)
   2. `herdr worktree open --cwd <repo-root> --path "$(gwq list --json | jq -r --arg b <branch> '.[] | select(.branch == $b and .is_main == false) | .path')" --label <branch> --no-focus`
   3. `herdr agent start <name> --kind claude --pane <root-pane-id>`
 - `GIT_ALLOW_BRANCH_SWITCH=1` bypasses the hook. Use it only when the user explicitly asks to switch branches in the canonical checkout.
+
+## 別 space に任せた作業は `gwt-tasks` で追う
+
+herdr は agent の状態（実行中 / 待機 / 要承認 / 完了）しか持たない。「何を任せたのか」「誰が任せたのか」は持っていないので、`gwt` で切り出しただけでは起動側から作業を追えない。台帳はそこを埋めるためにある。
+
+- 一覧: `gwt-tasks`（状態・タスク・経過・space）。`--mine` で自分のペインから出した依頼だけに絞る。`--json` は機械可読。
+- 詳細: `gwt-tasks show <agent>`。依頼の全文と、**委譲先の直近の返答**が出る。返答は Claude Code のトランスクリプトから読むので、agent が終了した後でも読める。`--replies N` で遡る数を増やす。
+- 片付け: 依頼が済んだら `gwt-tasks done <agent>`。`gwt-tasks prune` は agent もワークツリーも無い依頼だけを外す（ワークツリーが残っているものは作業途中とみなして残す）。
+- 状態の情報源は常に herdr。台帳は状態を持たないので、食い違ったら herdr が正しい。
+- 依頼を出してこちらの応答を終えるときは、`herdr-wait set "<agent> の作業待ち"` で待ちの印を立てる（外部待ちのルールと同じ）。相手が答えたら `herdr-wait clear`。
