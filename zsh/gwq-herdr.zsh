@@ -278,7 +278,11 @@ function gwt() {
     if [[ -n "${task}" ]]; then
         if (( ! ready )); then
             echo "gwt: agent が入力待ちのため依頼は渡していません（台帳には残してあります）" >&2
-        elif herdr agent prompt "${name}" "${task}" > /dev/null 2>&1; then
+        elif herdr agent prompt "${name}" "${task}"$'\n\n'"## 依頼元とのやりとり
+- この作業は agent（pane ${HERDR_PANE_ID:-不明}）から任されたもの。選択肢・仕様の判断・確認は、人間ではなく依頼元に聞く。AskUserQuestion や承認待ちで止まらない。
+- 聞くときは \`herdr-ask send \"<質問、選択肢、推奨案>\"\`。送ったらそのターンを終える。返答は新しい入力として届く。
+- 依頼元に届かなかった（herdr-ask が失敗した）ときだけ、人間に聞いてよい。
+- 区切りごとと完了時は、結果を \`herdr-ask send\` で依頼元に一行で報告する。" > /dev/null 2>&1; then
             echo "gwt: 依頼を渡しました"
         else
             echo "gwt: 依頼を渡せませんでした。workspace ${workspace} で直接渡してください。" >&2

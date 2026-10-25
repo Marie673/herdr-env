@@ -11,6 +11,15 @@
             "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" tool"
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/herdr-ask\" hook-question"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -39,6 +48,10 @@
           {
             "type": "command",
             "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" notify"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/herdr-ask\" hook-blocked"
           }
         ]
       }

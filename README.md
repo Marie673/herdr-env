@@ -14,6 +14,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
+- **`herdr-ask` / `herdr-await`** が agent 同士の質問・承認を人間ではなく依頼元 agent に回す。依頼先は `herdr-ask send` で依頼元に聞き、依頼元は `herdr-await` で相手が止まるのを待つ。Claude は AskUserQuestion を PreToolUse フックで deny して誘導し、承認待ちは Notification フックで依頼元に知らせる（`herdr/bin/herdr-ask.sh`、`herdr/bin/herdr-await.sh`）。
 - **`gwt-tasks`** が「別 space の誰に何を任せたか」の台帳を持ち、herdr の状態と突き合わせて一覧にする（`herdr/bin/gwt-tasks.py`）。
 - **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
@@ -30,6 +31,8 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
 | `herdr/bin/gh-ci-wait.sh` | `~/.config/herdr/bin/gh-ci-wait.sh` + `~/.local/bin/gh-ci-wait` へ symlink |
 | `herdr/bin/gwt-tasks.py` | `~/.config/herdr/bin/gwt-tasks.py` + `~/.local/bin/gwt-tasks` へ symlink |
+| `herdr/bin/herdr-ask.sh` | `~/.config/herdr/bin/herdr-ask.sh` + `~/.local/bin/herdr-ask` へ symlink |
+| `herdr/bin/herdr-await.sh` | `~/.config/herdr/bin/herdr-await.sh` + `~/.local/bin/herdr-await` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
 | `launchd/dev.marie673.wt-audit.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
@@ -110,6 +113,9 @@ install -m 755 herdr/bin/wt-audit.sh ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/wt-audit.sh ~/.local/bin/wt-audit
 install -m 755 herdr/bin/gwt-tasks.py ~/.config/herdr/bin/
 ln -sf ~/.config/herdr/bin/gwt-tasks.py ~/.local/bin/gwt-tasks
+install -m 755 herdr/bin/herdr-ask.sh herdr/bin/herdr-await.sh ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/herdr-ask.sh ~/.local/bin/herdr-ask
+ln -sf ~/.config/herdr/bin/herdr-await.sh ~/.local/bin/herdr-await
 ```
 
 `config.toml` の要点:

@@ -61,3 +61,19 @@ herdr は agent の状態（実行中 / 待機 / 要承認 / 完了）しか持�
 - 片付け: 依頼が済んだら `gwt-tasks done <agent>`。`gwt-tasks prune` は agent もワークツリーも無い依頼だけを外す（ワークツリーが残っているものは作業途中とみなして残す）。
 - 状態の情報源は常に herdr。台帳は状態を持たないので、食い違ったら herdr が正しい。
 - 依頼を出してこちらの応答を終えるときは、`herdr-wait set "<agent> の作業待ち"` で待ちの印を立てる（外部待ちのルールと同じ）。相手が答えたら `herdr-wait clear`。
+
+## agent 同士の質問・承認は、人間ではなく依頼元に回す
+
+別の agent に作業を任せる（`gwt --task` / `herdr agent prompt`）と、任された側が選択肢や承認で止まる。この質問は人間ではなく、**任せた側の agent** が受ける。台帳（`gwt-tasks`）の「依頼元」が宛先。
+
+### 任された側（依頼先）
+- 選択肢・仕様の判断・確認が要るときは、AskUserQuestion を使わず `herdr-ask send "<質問、選択肢、推奨案>"` で依頼元に聞く。送ったらそのターンを終える。返答は新しい入力として届く。
+- 区切りごとと完了時も `herdr-ask send` で依頼元に一行で報告する。進捗は `herdr agent prompt --wait` の無言ブロックでは伝わらない。
+- `herdr-ask` が失敗した（依頼元がいない、承認待ちで届かない）ときだけ人間に聞く。依頼元が人間なら従来どおり人間に聞く。
+- Claude では、依頼元がいる pane で AskUserQuestion を呼ぶと PreToolUse フックが deny して `herdr-ask` に誘導する。承認待ちで止まると Notification フックが依頼元に知らせる。Codex にはこのフックが無いので、この規約が頼り。
+
+### 任せた側（依頼元）
+- 依頼を出したら `herdr-await <agent>` を Bash の `run_in_background: true` で起動し、応答を終える。相手が止まる（idle / done / blocked）と完了通知が届く。blocked なら画面の下端も出る。
+- `[依頼先 … から]` で始まる入力は、人間ではなく依頼先 agent からの質問。依頼の趣旨で決められるものは自分で決め、`herdr agent prompt <agent> "<回答>"` で返す。blocked の選択肢は `herdr agent read <agent> --source detection` で読み、`herdr agent send-keys` で答える。
+- herdr スキルの「blocked はユーザーに聞く」は、**自分が任せた agent** には当てはまらない。ただし次は自分で承認せず、人間に確認する: このファイルの approval policy で人間の承認が要る操作（作業ディレクトリ外の削除、force push、`gcloud`/`aws` の変更系）、費用が発生する操作、依頼にも趣旨にも書かれていない判断。
+- 人間の承認を待つ間は `herdr-wait set "<何を待っているか>"` で印を立てる。
