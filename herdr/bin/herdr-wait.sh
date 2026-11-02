@@ -13,9 +13,14 @@
 #   herdr-wait status                          … このペインの印を出す（無ければ終了コード1）
 #   herdr-wait label                           … サイドバー用の1行（経過時間つき）。無ければ空
 #   herdr-wait list                            … 印が立っている全ペイン
+#   herdr-wait human on|off|status             … 「人間の返事待ち」の旗（Stop / UserPromptSubmit フックが操作する）
+#   herdr-wait refresh [--act <文言>]          … 印と旗から state_text と $act を herdr に出し直す
 #
 # 印は TTL（既定6時間）を過ぎると自動で無効になる。消し忘れても居座らない。
 # --pid 付きの印は、そのプロセスが終わった時点でも無効になる（監視ループが死んでも残らない）。
+#
+# 人間の返事待ちの旗は、外部待ちの印より優先する。印が残っていても、人間に問いかけて
+# ターンを終えたペインは working に保たず「💬 要返答」と出す（印は消さずに残す）。
 
 set -u
 
@@ -23,7 +28,7 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-wait"
 TTL_SECONDS="${HERDR_WAIT_TTL:-21600}"
 
 usage() {
-  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 resolve_pane() {
@@ -87,31 +92,39 @@ read_marker() {
   printf '%s\t%s' "$_started" "$_label"
 }
 
-# herdr に印の有無を反映させる。herdr-activity.sh と同じ source を使うので
+human_path() {
+  printf '%s/human/%s' "$STATE_DIR" "$(printf '%s' "$1" | tr ':/' '__')"
+}
+
+is_human_turn() {
+  [ -f "$(human_path "$1")" ]
+}
+
+# herdr に表示を反映させる。herdr-activity.sh と同じ source を使うので
 # 片方が書けばもう片方の表示も置き換わる。
-push_state_labels() {
+# 優先順位: 人間の返事待ち > 外部待ちの印 > 通常。$2 を渡せば $act はそれを使う。
+push_labels() {
   _pane="$1"
-  _waiting="$2"
+  _act="${2:-}"
   command -v herdr >/dev/null 2>&1 || return 0
-  if [ "$_waiting" = 1 ]; then
-    herdr pane report-metadata "$_pane" \
-      --source custom:activity --applies-to-source herdr:claude \
-      --token act="$3" \
-      --state-label done="⏳ 外部待ち" \
-      --state-label idle="⏳ 外部待ち" \
-      --state-label working="⏳ 外部待ち" \
-      --state-label blocked="⚠ 要承認" \
-      --state-label unknown="? 不明" >/dev/null 2>&1
+  if is_human_turn "$_pane"; then
+    [ -n "$_act" ] || _act="💬 要返答"
+    _done="💬 要返答"; _idle="💬 要返答"; _working="… 実行中"
+  elif _m="$(read_marker "$_pane")"; then
+    [ -n "$_act" ] || _act="⏳ ${_m#*	}"
+    _done="⏳ 外部待ち"; _idle="⏳ 外部待ち"; _working="⏳ 外部待ち"
   else
-    herdr pane report-metadata "$_pane" \
-      --source custom:activity --applies-to-source herdr:claude \
-      --token act="待機中" \
-      --state-label done="✅ 完了 未確認" \
-      --state-label idle="待機" \
-      --state-label working="… 実行中" \
-      --state-label blocked="⚠ 要承認" \
-      --state-label unknown="? 不明" >/dev/null 2>&1
+    [ -n "$_act" ] || _act="待機中"
+    _done="✅ 完了 未確認"; _idle="待機"; _working="… 実行中"
   fi
+  herdr pane report-metadata "$_pane" \
+    --source custom:activity --applies-to-source herdr:claude \
+    --token act="$_act" \
+    --state-label done="$_done" \
+    --state-label idle="$_idle" \
+    --state-label working="$_working" \
+    --state-label blocked="⚠ 要承認" \
+    --state-label unknown="? 不明" >/dev/null 2>&1
 }
 
 cmd="${1:-}"
@@ -120,6 +133,7 @@ cmd="${1:-}"
 OPT_PANE=""
 OPT_PID=""
 OPT_IF_PID=""
+OPT_ACT=""
 args=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -137,6 +151,10 @@ while [ $# -gt 0 ]; do
       ;;
     --if-pid)
       OPT_IF_PID="${2:-}"
+      shift 2 || break
+      ;;
+    --act)
+      OPT_ACT="${2:-}"
       shift 2 || break
       ;;
     *)
@@ -158,7 +176,7 @@ case "$cmd" in
       printf '%s\t%s\n' "$(date +%s)" "$label"
       [ -n "$OPT_PID" ] && printf 'pid %s\n' "$OPT_PID"
     } > "$(marker_path "$pane")"
-    push_state_labels "$pane" 1 "⏳ $label"
+    push_labels "$pane"
     echo "waiting: $pane — $label"
     ;;
 
@@ -171,7 +189,7 @@ case "$cmd" in
       exit 0
     fi
     rm -f "$f"
-    push_state_labels "$pane" 0 ""
+    push_labels "$pane"
     echo "cleared: $pane"
     ;;
 
@@ -198,7 +216,9 @@ case "$cmd" in
     # に合わせてあるので、この行が画面にある間ペインの状態は working になり、
     # idle（live_prompt_box, priority 950）に落ちない。
     # 先頭の `· ` と末尾の `…` は検出条件そのもの。崩すと働かなくなる。
+    # 人間に問いかけてターンを終えたペインでは出さない。出すと「人間の番」が working に隠れる。
     pane="$(resolve_pane)" || exit 0
+    is_human_turn "$pane" && exit 0
     m="$(read_marker "$pane")" || exit 0
     started="${m%%	*}"
     label="${m#*	}"
@@ -215,6 +235,35 @@ case "$cmd" in
       label="${m#*	}"
       echo "$pane	$label	$(elapsed_text $(( $(date +%s) - started )))"
     done
+    ;;
+
+  human)
+    pane="$(resolve_pane)" || exit 0
+    hf="$(human_path "$pane")"
+    case "$args" in
+      on)
+        mkdir -p "$(dirname "$hf")"
+        date +%s > "$hf"
+        push_labels "$pane" "${OPT_ACT:-}"
+        ;;
+      off)
+        [ -f "$hf" ] || exit 0
+        rm -f "$hf"
+        push_labels "$pane" "${OPT_ACT:-}"
+        ;;
+      status)
+        [ -f "$hf" ]
+        ;;
+      *)
+        echo "herdr-wait: human は on / off / status のどれかです" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+
+  refresh)
+    pane="$(resolve_pane)" || exit 0
+    push_labels "$pane" "${OPT_ACT:-}"
     ;;
 
   ''|-h|--help|help)

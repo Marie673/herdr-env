@@ -14,7 +14,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
-- **`herdr-ask` / `herdr-await`** が agent 同士の質問・承認を人間ではなく依頼元 agent に回す。依頼先は `herdr-ask send` で依頼元に聞き、依頼元は `herdr-await` で相手が止まるのを待つ。Claude は AskUserQuestion を PreToolUse フックで deny して誘導し、承認待ちは Notification フックで依頼元に知らせる（`herdr/bin/herdr-ask.sh`、`herdr/bin/herdr-await.sh`）。
+- **`herdr-ask` / `herdr-await`** が agent 同士の質問・承認を人間ではなく依頼元 agent に回す。依頼先は `herdr-ask send` で依頼元に聞き、依頼元は `herdr-await` で相手が止まるのを待つ（待っている間は自分の PID つきで `herdr-wait` の印を立て、終われば外す）。Claude は AskUserQuestion を PreToolUse フックで deny して誘導し、承認待ちは Notification フックで依頼元に知らせる（`herdr/bin/herdr-ask.sh`、`herdr/bin/herdr-await.sh`）。
 - **`gwt-tasks`** が「別 space の誰に何を任せたか」の台帳を持ち、herdr の状態と突き合わせて一覧にする（`herdr/bin/gwt-tasks.py`）。
 - **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
@@ -284,6 +284,18 @@ herdr-wait list                                  # 印が立っている全ペ�
 印は `~/.local/state/herdr-wait/<pane_id>` に置かれ、6時間（`HERDR_WAIT_TTL`）で自動失効する。状態が working になるのに加えて、`herdr-activity.sh` が state_text を `⏳ 外部待ち`、`$act` を `⏳ <ラベル> <経過時間>` に差し替える。
 
 印の付け外しは Claude 自身にやらせる。`claude/CLAUDE.snippet.md` の「外部待ちは herdr に印を立てる」がその指示。
+
+**人間の返事待ちは外部待ちより優先する。** 印が残ったまま Claude が人間に「進めてよいですか」と聞いてターンを終えると、ステータスラインの `· ⏳ …` 行のせいでペインは working のままになり、人間の番であることがサイドバーから消える。手で立てた委譲待ちの印を、返事が届いた後に消し忘れたときに実際に起きた。そこで:
+
+- `herdr-activity.sh stop` が最後の返答（Stop 入力の `last_assistant_message`、無ければトランスクリプトの末尾）の末尾3行を見て、人間への問いかけ（`？` で終わる、`〜ますか。`、「お返事」「教えてください」「承認をお願い」など）なら `herdr-wait human on` で旗を立てる。
+- 旗が立っている間、`herdr-wait statusline` は何も出さない。ペインは idle / done に落ち、state_text と `$act` は `💬 要返答` になる。外部待ちの印は消さずに残す。
+- 人間が入力すると（UserPromptSubmit）旗は降り、印が残っていれば working 表示に戻る。
+- 旗は `~/.local/state/herdr-wait/human/<pane_id>`。判定は文面の推測なので、問いかけの形を外れた聞き方は取りこぼす。Claude には「人間に聞くときは返答の最後を問いかけで終える」よう CLAUDE.md で指示している。
+
+```sh
+herdr-wait human on|off|status   # 人間の返事待ちの旗（通常はフックが操作する）
+herdr-wait refresh [--act <文言>] # 印と旗から state_text と $act を出し直す
+```
 
 #### CI 待ち（gh-ci-wait）
 

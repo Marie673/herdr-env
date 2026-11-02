@@ -18,18 +18,56 @@ if printf '%s' "$input" | jq -e 'has("agent_id") and (.agent_id != null)' >/dev/
   exit 0
 fi
 
-# 外部待ち（CodeRabbit のレビュー、CI 等）の印。立っていれば idle / done の見え方を差し替える。
-# 印は herdr-wait が張り、TTL 切れなら空が返る。
-wait_label=""
-if [ -x "$HOME/.config/herdr/bin/herdr-wait.sh" ]; then
-  wait_label="$("$HOME/.config/herdr/bin/herdr-wait.sh" label 2>/dev/null)"
-fi
+HW="$HOME/.config/herdr/bin/herdr-wait.sh"
+[ -x "$HW" ] || exit 0
+
+# 最後の返答が人間への問いかけで終わっているか。Stop の入力の last_assistant_message を見て、
+# 無ければトランスクリプトの末尾から拾う。末尾3行だけを見る（途中の引用で誤判定しないため）。
+ends_with_question() {
+  _msg="$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2>/dev/null)"
+  if [ -z "$_msg" ]; then
+    _tp="$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null)"
+    [ -n "$_tp" ] && [ -f "$_tp" ] || return 1
+    _msg="$(tail -n 400 "$_tp" | jq -rs '
+      [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text]
+      | last // empty' 2>/dev/null)"
+  fi
+  [ -n "$_msg" ] || return 1
+  printf '%s' "$_msg" | jq -Rse '
+    [split("\n")[] | gsub("^\\s+|\\s+$"; "") | select(length > 0)] | .[-3:] as $tail
+    | ($tail | map(gsub("[*_`）)」』\\]]+$"; "")) ) as $t
+    | ($t | any(test("[?？]$")))
+      or ($t | any(test("(ますか|ですか|でしょうか|ませんか|ましょうか)[。．!！]?$")))
+      or ($tail | join("\n") | test(
+           "お返事|ご返答|ご判断|ご指示|教えてください|選んでください|決めてください|"
+         + "(承認|確認|許可|指示)を?(ください|お願い|いただ)|"
+         + "let me know|should I |shall I |would you like|do you want|which (one|option)"; "i"))
+  ' >/dev/null 2>&1
+}
+
+wait_label="$("$HW" label 2>/dev/null)"
 
 case "$action" in
-  prompt) act="考え中…" ;;
-  stop)   act="${wait_label:-待機中}" ;;
-  notify) act="要確認" ;;
+  prompt)
+    # 人間が答えた。返事待ちの旗を降ろす
+    "$HW" human off >/dev/null 2>&1
+    act="考え中…"
+    ;;
+  stop)
+    if ends_with_question; then
+      # 外部待ちの印が残っていても、人間の番であることを優先して見せる
+      "$HW" human on >/dev/null 2>&1
+      act="💬 要返答"
+    else
+      "$HW" human off >/dev/null 2>&1
+      act="${wait_label:-待機中}"
+    fi
+    ;;
+  notify)
+    if "$HW" human status >/dev/null 2>&1; then act="💬 要返答"; else act="要確認"; fi
+    ;;
   clear)
+    "$HW" human off >/dev/null 2>&1
     herdr pane report-metadata "$HERDR_PANE_ID" \
       --source custom:activity --applies-to-source herdr:claude \
       --clear-token act --clear-state-labels >/dev/null 2>&1
@@ -56,39 +94,17 @@ case "$action" in
                          then ($t | sub("^mcp__"; "") | gsub("__"; " ") | clip(32))
       else ($t | clip(32)) end
     ' 2>/dev/null)"
+    # 待ち中は、ツール実行の表示にも ⏳ を付けて「まだ用事が終わっていない」と分かるようにする。
+    [ -n "$wait_label" ] && [ -n "$act" ] && act="⏳ $act"
     ;;
   *) exit 0 ;;
 esac
 
 [ -n "$act" ] || exit 0
 
-# 待ち中は、ツール実行の表示にも ⏳ を付けて「まだ用事が終わっていない」と分かるようにする。
-if [ -n "$wait_label" ] && [ "$action" = "tool" ]; then
-  act="⏳ $act"
-fi
-
-# 待ち中の idle / done は「もう用は無い」ではなく「外部の返事待ち」。文言を差し替える。
-# statusline の待ち行によって状態自体は working になるが、取りこぼしに備えて
-# idle / done 側の文言も待ち用にしておく。
-if [ -n "$wait_label" ]; then
-  label_done="⏳ 外部待ち"
-  label_idle="⏳ 外部待ち"
-  label_working="⏳ 外部待ち"
-else
-  label_done="✅ 完了 未確認"
-  label_idle="待機"
-  label_working="… 実行中"
-fi
-
-# herdr のテーマには状態別の色トークンが無く、idle と done を色で分けられない。
-# 代わりに状態の表示文字そのものを差し替えて見分けられるようにする。
-herdr pane report-metadata "$HERDR_PANE_ID" \
-  --source custom:activity --applies-to-source herdr:claude \
-  --token act="$act" \
-  --state-label done="$label_done" \
-  --state-label idle="$label_idle" \
-  --state-label working="$label_working" \
-  --state-label blocked="⚠ 要承認" \
-  --state-label unknown="? 不明" >/dev/null 2>&1
+# state_text（done / idle / working の表示文字）は herdr-wait が印と旗から決める。
+# herdr のテーマには状態別の色トークンが無く、idle と done を色で分けられないので、
+# 表示文字そのものを差し替えて見分けられるようにしている。
+"$HW" refresh --act "$act" >/dev/null 2>&1
 
 exit 0
