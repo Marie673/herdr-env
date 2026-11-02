@@ -204,15 +204,25 @@ function gwt() {
         return 1
     }
 
-    local worktree
+    local worktree new_branch=0
     worktree=$(_gwt_path "${branch}")
     if [[ -z "${worktree}" ]]; then
         if git show-ref --verify --quiet "refs/heads/${branch}"; then
             gwq add "${branch}" || return 1
         else
             gwq add -b "${branch}" || return 1
+            new_branch=1
         fi
         worktree=$(_gwt_path "${branch}")
+        # 新しいブランチは追跡先が無く、エージェントの `git pull --ff-only` が止まる。
+        # 既定ブランチ（origin/HEAD、無ければ origin/main）を追跡先にしておく。
+        # 最初の `git push -u origin <branch>` で追跡先は自分のブランチに置き換わる。
+        if (( new_branch )) && [[ -n "${worktree}" ]]; then
+            local upstream
+            upstream=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || upstream=origin/main
+            git -C "${worktree}" branch --quiet --set-upstream-to="${upstream}" "${branch}" 2>/dev/null \
+                || echo "gwt: 追跡先 ${upstream} を設定できませんでした（作業は続けられます）" >&2
+        fi
     fi
     if [[ -z "${worktree}" ]]; then
         echo "gwt: ワークツリーのパスを特定できませんでした: ${branch}" >&2
