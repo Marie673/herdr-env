@@ -1,0 +1,30 @@
+id = "worktree-setup"
+name = "Worktree Setup"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "ワークツリーを初めて開いたら .env などをコピーして依存を入れる。space が閉じたら gwt-tasks の台帳を片付ける"
+platforms = ["macos"]
+
+# gwt は `herdr worktree open` を使うので opened が来る。herdr の worktree create は created
+[[events]]
+on = "worktree.opened"
+command = ["/usr/bin/python3", "bin/wt_setup.py", "event"]
+
+[[events]]
+on = "worktree.created"
+command = ["/usr/bin/python3", "bin/wt_setup.py", "event"]
+
+[[events]]
+on = "worktree.removed"
+command = ["/usr/bin/python3", "bin/wt_setup.py", "teardown"]
+
+[[events]]
+on = "workspace.closed"
+command = ["/usr/bin/python3", "bin/wt_setup.py", "teardown"]
+
+# 既にあるワークツリーにやり直したいとき（印を無視して、フォーカス中の space で実行する）
+[[actions]]
+id = "rerun"
+title = "このワークツリーのセットアップをやり直す"
+contexts = ["workspace"]
+command = ["/usr/bin/python3", "bin/wt_setup.py", "run", "--force"]

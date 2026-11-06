@@ -102,10 +102,24 @@ fi
 
 [ -n "$LABEL" ] || LABEL="PR #$PR CI 待ち"
 
+# サイドバーの PR 状態（pr-status プラグインの $ci / $rv）を、この待ちの進み具合に合わせて取り直す。
+# 別リポジトリ（-R）を待っているときは、手元の space とは関係ないので触らない。
+refresh_pr_status() {
+  [ -z "$REPO" ] && command -v herdr-pr-status >/dev/null 2>&1 || return 0
+  (herdr-pr-status sync --path "$PWD" --fresh >/dev/null 2>&1 &)
+}
+
+on_exit() {
+  refresh_pr_status
+  if [ "$MARK" = 1 ] && command -v herdr-wait >/dev/null 2>&1; then
+    herdr-wait clear --if-pid $$ >/dev/null 2>&1 || true
+  fi
+}
+
 if [ "$MARK" = 1 ] && command -v herdr-wait >/dev/null 2>&1; then
   herdr-wait set --pid $$ "$LABEL" >/dev/null 2>&1 || true
-  trap 'herdr-wait clear --if-pid $$ >/dev/null 2>&1 || true' EXIT
 fi
+trap on_exit EXIT
 trap 'exit 130' INT TERM HUP
 
 log "PR #$PR ($pr_url) の ${SHA:0:9} を待ちます（上限 $((TIMEOUT / 60))分）"
@@ -196,6 +210,7 @@ while :; do
   if [ "$summary" != "$prev_summary" ]; then
     log "$summary"
     prev_summary="$summary"
+    refresh_pr_status
   fi
 
   # 後から登録されるワークフローを取りこぼさないよう、出始めてから SETTLE 秒は待ち、

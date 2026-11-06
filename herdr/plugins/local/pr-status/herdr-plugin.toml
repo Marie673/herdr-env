@@ -1,0 +1,25 @@
+id = "pr-status"
+name = "PR Status"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "ワークツリーの space に、そのブランチの PR 状態（番号・CI・レビュー）をトークンで出す（$pr / $ci / $rv）"
+platforms = ["macos"]
+
+# metadata はサーバ再起動で消えるので、起動のたびに全部付け直す
+[[startup]]
+command = ["/usr/bin/python3", "bin/pr_status.py", "sync", "--all"]
+
+# 開いたばかりのワークツリーと、見に行った space は、その場で取り直す
+[[events]]
+on = "worktree.opened"
+command = ["/usr/bin/python3", "bin/pr_status.py", "event"]
+
+[[events]]
+on = "workspace.focused"
+command = ["/usr/bin/python3", "bin/pr_status.py", "event"]
+
+[[actions]]
+id = "sync"
+title = "PR 状態を全部取り直す"
+contexts = ["workspace"]
+command = ["/usr/bin/python3", "bin/pr_status.py", "sync", "--all", "--fresh"]

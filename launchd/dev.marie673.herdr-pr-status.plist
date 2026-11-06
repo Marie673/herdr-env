@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ワークツリーの space に出している PR 状態（pr-status プラグインの $pr / $ci / $rv）を定期的に取り直す。
+  プラグイン側は起動時・フォーカス時・ワークツリーを開いたときにしか動かないので、
+  見ていない space の CI やレビューの変化はこちらで拾う。gh はリポジトリごとに GraphQL 1回。
+  ~/Library/LaunchAgents/ に置いて launchctl bootstrap で有効化する。
+  パスは環境に合わせて書き換えること（USERNAME 部分）。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.marie673.herdr-pr-status</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>herdr-pr-status sync --all</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/okazaki/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- 3分ごと。トークンの TTL は30分なので、止まれば古い表示は自然に消える。 -->
+  <key>StartInterval</key>
+  <integer>180</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/okazaki/.local/state/herdr-pr-status/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/okazaki/.local/state/herdr-pr-status/launchd.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+</dict>
+</plist>

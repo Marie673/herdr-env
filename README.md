@@ -38,6 +38,9 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
 | `herdr/plugins/local/pane-title-sync/` | `~/.config/herdr/plugins/local/pane-title-sync/` |
 | `herdr/plugins/local/pane-id-copy/` | `~/.config/herdr/plugins/local/pane-id-copy/` |
+| `herdr/plugins/local/pr-status/` | `~/.config/herdr/plugins/local/pr-status/` + `~/.local/bin/herdr-pr-status` へ symlink |
+| `herdr/plugins/local/worktree-setup/` | `~/.config/herdr/plugins/local/worktree-setup/` |
+| `launchd/dev.marie673.herdr-pr-status.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `zsh/gwq-herdr.zsh` | 任意の場所に置き `.zshrc` から `source` |
 | `git/hooks/reference-transaction` | `~/.config/git/hooks/reference-transaction`（要 `chmod +x`） |
 | `git/workspace.gitconfig` | `~/.config/git/workspace.gitconfig` |
@@ -212,9 +215,14 @@ mkdir -p ~/.config/herdr/plugins/local
 cp -R herdr/plugins/local/agent-view-space ~/.config/herdr/plugins/local/
 cp -R herdr/plugins/local/pane-title-sync  ~/.config/herdr/plugins/local/
 cp -R herdr/plugins/local/pane-id-copy     ~/.config/herdr/plugins/local/
+cp -R herdr/plugins/local/pr-status        ~/.config/herdr/plugins/local/
+cp -R herdr/plugins/local/worktree-setup   ~/.config/herdr/plugins/local/
 herdr plugin link ~/.config/herdr/plugins/local/agent-view-space
 herdr plugin link ~/.config/herdr/plugins/local/pane-title-sync
 herdr plugin link ~/.config/herdr/plugins/local/pane-id-copy
+herdr plugin link ~/.config/herdr/plugins/local/pr-status
+herdr plugin link ~/.config/herdr/plugins/local/worktree-setup
+ln -sf ~/.config/herdr/plugins/local/pr-status/bin/pr_status.py ~/.local/bin/herdr-pr-status
 ```
 
 GitHub プラグイン（同梱しない。`herdr plugin install` で取得）:
@@ -239,6 +247,69 @@ Herdr 0.8.2 では config の `agent_panel_scope` は**効かない**（パー�
 #### pane-title-sync の背景
 
 タイトル変更そのもののイベントは存在しないため、`pane.focused` / `pane.agent_status_changed` / `pane.created` の3フックで代用している。手動で付けた名前は `state.json`（ランタイム生成、リポジトリには含めない）で保護され、上書きされない。
+
+#### pr-status: space の行に PR の状態を出す
+
+ワークツリーの space の3行目に、そのブランチの PR を出す。PR が無い space では行ごと消える。
+
+```
+⠿ feat/knowledge-status-legend
+  feat/knowledge-status-legend ↑1
+  #485 競合  CI ✓  CR ✓ 未解決1
+```
+
+| トークン | 値 |
+|---|---|
+| `$pr` | `#123` / `#123 draft` / `#123 競合` / `#123 merged` / `#123 closed` |
+| `$ci` | `CI ✓` / `CI …` / `CI ✗2`（CodeRabbit を除いた checks） |
+| `$rv` | `CR …` / `CR ✓`（CodeRabbit の check）と、`要修正` / `未解決N`（未解決のレビュースレッド）/ `承認` |
+
+色は `config.toml` の `rules`（値に含まれる文字）で付けている。gh の呼び出しはリポジトリごとに GraphQL 1回で、open な PR をまとめて取る。open に無いブランチだけ `gh pr list --head` で1回引き、merged / closed / PR 無しを `~/.local/state/herdr-pr-status/state.json` に覚える。
+
+取り直すタイミング:
+
+- herdr の起動時（`[[startup]]`、metadata はサーバ再起動で消えるため）
+- ワークツリーを開いたとき（`worktree.opened`）と、space にフォーカスしたとき（`workspace.focused`、90秒以内に取った結果があればそれを使う）
+- `gh-ci-wait` の checks の状態が変わったときと、終わったとき（`herdr-pr-status sync --path "$PWD" --fresh`）
+- launchd で3分ごと（見ていない space のレビューや merge を拾う）
+
+```sh
+cp launchd/dev.marie673.herdr-pr-status.plist ~/Library/LaunchAgents/
+mkdir -p ~/.local/state/herdr-pr-status
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.marie673.herdr-pr-status.plist
+```
+
+トークンの TTL は30分なので、定期実行が止まれば古い表示は勝手に消える。
+
+#### worktree-setup: ワークツリーを開いたら .env を置いて依存を入れる
+
+`gwt` は `herdr worktree open` を使うので、`worktree.opened`（herdr の create なら `worktree.created`）をフックして、初回だけ次をやる。
+
+1. main のチェックアウトで **git 管理外かつ .gitignore に当たっている**設定ファイル（`.env` / `.env.*` / `.envrc` / `.dev.vars` / `*.local.{toml,json,yaml,yml}`）を同じ相対パスへコピー。`.claude/settings.local.json` もここで付いてくる。ワークツリー側に既にあるものは上書きしない
+2. ルートの lockfile で依存を入れる（pnpm / npm / bun / yarn / uv の順、`mise exec --` 経由）。`node_modules` / `.venv` が既にあれば触らない
+3. `config.json` の `setup` に書いたコマンドを実行
+
+「初回」の印は `<git-dir>/herdr-setup.json`（`.git/worktrees/<name>/` の中）なので、ワークツリーを消せば一緒に消える。実行中はその space の1行目に `⚙ setup`、失敗すると `✗ setup` と herdr の通知が出る。ログは `~/.local/state/herdr/plugins/worktree-setup/<ディレクトリ名>.log`。
+
+導入したときに既にあったワークツリーで走らないよう、先に印を付けておく:
+
+```sh
+for p in $(gwq list -g --json | jq -r '.[] | select(.is_main == false) | .path'); do
+  gd=$(git -C "$p" rev-parse --absolute-git-dir) && [ ! -e "$gd/herdr-setup.json" ] \
+    && echo '{"status":"preexisting"}' > "$gd/herdr-setup.json"
+done
+```
+
+リポジトリごとの上書きは `$(herdr plugin config-dir worktree-setup)/config.json`:
+
+```json
+{"default": {"install": true},
+ "repos": {"ai-president-next": {"setup": [["npm", "run", "prepare"]]}}}
+```
+
+やり直すときは、その space でプラグインアクション「このワークツリーのセットアップをやり直す」（`herdr plugin action invoke worktree-setup.rerun`）。
+
+space が閉じたとき・ワークツリーが消えたとき（`workspace.closed` / `worktree.removed`）は `gwt-tasks prune` を走らせて、agent もワークツリーも無くなった依頼を台帳から外す。
 
 ### 7. Herdr × Claude Code 連携
 

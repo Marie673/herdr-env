@@ -72,10 +72,36 @@ codex = [
 [ui.sidebar.spaces]
 row_gap = 0
 rows = [
-  ["state_icon", { token = "workspace", fg = "#ffffff", bold = true, dim = false }],
+  [
+    "state_icon",
+    { token = "workspace", fg = "#ffffff", bold = true, dim = false },
+    # ワークツリーの初回セットアップ（worktree-setup プラグイン）。実行中は黄、失敗は赤
+    { token = "$setup", fg = "#e0af68", dim = false, rules = [{ contains = "✗", fg = "#f7768e", bold = true }] },
+  ],
   [
     { token = "branch", fg = "#f2f2f2", dim = false },
     { token = "git_status", fg = "#f2f2f2", dim = false },
+  ],
+  # PR の状態（pr-status プラグイン）。PR が無い space ではこの行ごと消える
+  [
+    { token = "$pr", fg = "#f2f2f2", dim = false, rules = [
+      { contains = "merged", fg = "#bb9af7" },
+      { contains = "closed", fg = "#737aa2" },
+      { contains = "競合", fg = "#f7768e", bold = true },
+      { contains = "draft", fg = "#737aa2" },
+    ] },
+    { token = "$ci", fg = "#f2f2f2", dim = false, rules = [
+      { contains = "✗", fg = "#f7768e", bold = true },
+      { contains = "…", fg = "#e0af68" },
+      { contains = "✓", fg = "#9ece6a" },
+    ] },
+    { token = "$rv", fg = "#7aa2f7", dim = false, rules = [
+      { contains = "要修正", fg = "#f7768e", bold = true },
+      { contains = "未解決", fg = "#ff9e64" },
+      { contains = "…", fg = "#e0af68" },
+      { contains = "承認", fg = "#9ece6a" },
+      { contains = "✓", fg = "#9ece6a" },
+    ] },
   ],
 ]
 
