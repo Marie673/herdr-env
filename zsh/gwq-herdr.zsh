@@ -147,14 +147,18 @@ function _gwt_path() {
 
 # gwt: gwq + herdr の作業開始コマンド。
 #   gwt <branch> [--task "<引き継ぎ文>"|--task-file <path>] [--no-agent] [--no-focus]
-# ワークツリーを用意し、herdr の workspace として開いて Claude Code を起動する。
+# ワークツリーを用意し、herdr の workspace として開く。
 # 本体リポジトリ(main/master)はブランチ切り替えを禁止しているので、作業は必ずこの入口から始める。
 # herdr の外で実行した場合は、ワークツリーへ cd するだけ。
 #
-# --task を渡すと、起動した agent への最初の指示としてそれを投げ、同時に「誰に何を
-# 任せたか」を gwt-tasks の台帳へ記録する。herdr は agent の状態しか持たないので、
-# 依頼の内容と依頼元は台帳側で持つ。起動側はブロックせず、以後の追跡は
-# `gwt-tasks` と `gwt-tasks show <agent>` で行う。
+# 呼んだのが herdr の agent ペイン（main で作業していた Claude Code など）なら、新しい agent は
+# 起動せず、そのペイン自体を新しい workspace へ移す（GUI の「Move to...」と同じ）。会話を
+# 引き継いだまま 1 つの agent で続けるため。移したあとワークツリーへ cd する。
+# 元の workspace はペインが無くなれば herdr が閉じる。
+#
+# 呼んだのが素のシェルなら、従来どおり新しい workspace のルートペインで Claude Code を起動する。
+# --task を渡したときも（agent ペインからでも）新しい Claude Code を起動して、それを最初の指示として
+# 投げ、gwt-tasks の台帳へ記録する。
 function gwt() {
     local branch="" start_agent=1 focus=1 task="" task_file=""
     while (( $# )); do
@@ -239,6 +243,36 @@ function gwt() {
     pane=$(print -r -- "${opened}" | jq -r '.result.root_pane.pane_id')
     workspace=$(print -r -- "${opened}" | jq -r '.result.workspace.workspace_id')
     already=$(print -r -- "${opened}" | jq -r '.result.already_open')
+
+    # agent ペインから呼ばれたら、そのペインを新しい workspace へ移して終わる
+    local self_pane="" self_ws=""
+    if (( start_agent )) && [[ -z "${task}" && -n "${HERDR_PANE_ID:-}" ]]; then
+        local self_info
+        self_info=$(herdr pane get "${HERDR_PANE_ID}" 2>/dev/null)
+        if [[ -n "$(print -r -- "${self_info}" | jq -r '.result.pane.agent // empty')" ]]; then
+            self_pane=$(print -r -- "${self_info}" | jq -r '.result.pane.pane_id')
+            self_ws=$(print -r -- "${self_info}" | jq -r '.result.pane.workspace_id')
+        fi
+    fi
+    if [[ -n "${self_pane}" ]]; then
+        local focus_flag=--focus
+        (( focus )) || focus_flag=--no-focus
+        if [[ "${self_ws}" == "${workspace}" ]]; then
+            : # もうその workspace にいる
+        elif [[ "${already}" == "true" ]]; then
+            # 既に開いている workspace は中身を壊さず、新しいタブとして足す
+            herdr pane move "${self_pane}" --new-tab --workspace "${workspace}" "${focus_flag}" > /dev/null || return 1
+        else
+            # 開いたばかりの workspace の空シェルと入れ替える
+            local tab
+            tab=$(print -r -- "${opened}" | jq -r '.result.root_pane.tab_id')
+            herdr pane move "${self_pane}" --tab "${tab}" --split right --target-pane "${pane}" "${focus_flag}" > /dev/null || return 1
+            herdr pane close "${pane}" > /dev/null 2>&1
+        fi
+        cd "${worktree}" || return 1
+        echo "gwt: ${branch} -> ${worktree} (このペインを workspace ${workspace} へ移しました)"
+        return 0
+    fi
 
     # herdr の agent 名の規則 [a-z][a-z0-9_-]{0,31} に合わせる
     local name="${branch:l}"

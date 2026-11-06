@@ -37,7 +37,11 @@ resolve_pane() {
     return 0
   fi
   if [ -n "${HERDR_PANE_ID:-}" ]; then
-    printf '%s' "$HERDR_PANE_ID"
+    # gwt がペインを別 workspace へ移すと pane_id が変わるが、プロセスの HERDR_PANE_ID は
+    # 古いまま残る。herdr は古い ID も今のペインに解決するので、今の ID に直して印を合わせる
+    # （agent-attention は今の ID で印を探す）。
+    _cur="$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)"
+    printf '%s' "${_cur:-$HERDR_PANE_ID}"
     return 0
   fi
   if [ -n "${HERDR_ACTIVE_PANE_ID:-}" ]; then

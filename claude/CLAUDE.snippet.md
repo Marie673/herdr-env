@@ -44,14 +44,15 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 ## Branch work must start from a gwq worktree
 
 - Repositories under `~/workspace/github.com/` are the canonical checkouts and stay on `main` / `master`. A `reference-transaction` hook (`~/.config/git/hooks/reference-transaction`) aborts `git switch` / `git checkout` there, so never plan work that depends on switching branches in the canonical checkout.
-- To start branch work, run `gwt <branch>` from inside the canonical checkout. It creates the gwq worktree, opens it as a Herdr workspace, and starts Claude Code in that workspace's root pane.
-- Under Herdr (`HERDR_ENV=1`), do not continue branch work in the current workspace. Move the work to the workspace that `gwt` opened for the worktree.
-- When you are the one handing work off, pass the handover with `gwt <branch> --task "<引き継ぎ文>"` (or `--task-file <path>` when it is long). **You write the handover text**, not the user: fold in what you already found, the assumptions you are making, and what counts as done. Being given only a branch name does not excuse dropping the context.
-- `--task` sends that text to the new agent as its first prompt and records the request in the `gwt-tasks` ledger. It does not block; the launching side keeps working.
+- To start branch work, run `gwt <branch>` from inside the canonical checkout. It creates the gwq worktree and opens it as a Herdr workspace.
+- 作業はシングル agent で続ける。別の agent（Codex・Sonnet・新しい Claude）を立てて実装を任せない。
+- Under Herdr (`HERDR_ENV=1`), `gwt` を agent ペインから実行すると、新しい agent は起動せず**自分のペインがそのまま新しい workspace へ移る**（「Move to...」と同じ。会話はそのまま）。移ったあと Bash の cwd はワークツリーに移るので、以降はワークツリーで作業を続ける。元の main の workspace はペインが無くなれば閉じる。
+- 移ったあとも `HERDR_PANE_ID` は古い値のままだが、herdr は古い ID も今のペインに解決するので herdr のコマンドはそのまま使える。
+- `gwt --task` は新しい Claude を起動して依頼する手動用の入口。人間に頼まれたとき以外は使わない。
 - When running the steps yourself instead of `gwt`, keep the same order:
   1. `gwq add -b <branch>` (or `gwq add <branch>` for an existing branch)
   2. `herdr worktree open --cwd <repo-root> --path "$(gwq list --json | jq -r --arg b <branch> '.[] | select(.branch == $b and .is_main == false) | .path')" --label <branch> --no-focus`
-  3. `herdr agent start <name> --kind claude --pane <root-pane-id>`
+  3. `herdr pane move "$HERDR_PANE_ID" --tab <root-tab-id> --split right --target-pane <root-pane-id> --focus` のあと `herdr pane close <root-pane-id>`、最後に `cd <worktree>`
 - `GIT_ALLOW_BRANCH_SWITCH=1` bypasses the hook. Use it only when the user explicitly asks to switch branches in the canonical checkout.
 
 ## 別 space に任せた作業は `gwt-tasks` で追う

@@ -10,7 +10,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - **ghq** が `~/workspace/github.com/<owner>/<repo>` に本体リポジトリ（canonical checkout）を置く。本体は常に `main`/`master` のまま。
 - git の `reference-transaction` フックが本体でのブランチ切り替えを**物理的に禁止**する（`git/hooks/reference-transaction`）。
 - ブランチ作業は **gwq** の worktree（`~/workspace/worktree/...=<branch>`）で行う。
-- zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開き、そのペインで Claude Code を起動するところまで一発でやる（`zsh/gwq-herdr.zsh`）。
+- zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開く（`zsh/gwq-herdr.zsh`）。main で動いている agent のペインから呼ぶと、新しい agent は立てずに**そのペインごと新しい workspace へ移す**（GUI の「Move to...」と同じ。会話を引き継いだままシングル agent で続ける）。素のシェルから呼んだときは新しい workspace で Claude Code を起動する。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
@@ -327,13 +327,19 @@ cp claude/skills/herdr/SKILL.md ~/.claude/skills/herdr/
 
 `claude/CLAUDE.snippet.md` の内容を `~/.claude/CLAUDE.md` に追記する。これで Claude が ghq/gwq/gwt の流儀（本体でブランチを切り替えない、作業は worktree から始める等）を守るようになる。
 
+`gwt` でペインを移したあと、Claude Code の Bash の cwd がワークツリーに留まるよう、ワークツリーの置き場所を `~/.claude/settings.json` の作業ディレクトリに足しておく（足さないと、本体リポジトリで起動した agent は cd してもリポジトリへ戻される）:
+
+```json
+{ "permissions": { "additionalDirectories": ["~/workspace/worktree"] } }
+```
+
 ## 日常の使い方
 
 ```sh
 # 本体リポジトリで:
-gwt feature/foo        # worktree 作成 → Herdr workspace → Claude 起動 まで一発
-gwt feature/foo --task "issue #123 を実装。PR まで。"   # 引き継ぎを渡して台帳に記録
-gwt feature/foo --no-agent   # Claude を起動しない
+gwt feature/foo        # worktree 作成 → Herdr workspace。agent ペインからならそのペインを移す / シェルからなら Claude 起動
+gwt feature/foo --task "issue #123 を実装。PR まで。"   # 新しい Claude に引き継ぎを渡して台帳に記録
+gwt feature/foo --no-agent   # workspace を開くだけ（ペインも移さず Claude も起動しない）
 gwt-tasks              # 別 space に任せた作業の一覧
 gwt-tasks show <agent> # 依頼の全文と委譲先の直近の返答
 dev                    # fzf でリポジトリ/worktree に移動
