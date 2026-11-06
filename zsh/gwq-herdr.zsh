@@ -296,9 +296,22 @@ function gwt() {
                 fi
                 # gwq のワークツリーは ghq 管理下の自分のリポジトリなので、
                 # Claude Code の初回フォルダ信頼プロンプトだけは自動で通す。
-                if herdr agent read "${name}" --source detection --lines 40 2>/dev/null | grep -q "I trust this folder"; then
-                    herdr agent send-keys "${name}" enter > /dev/null 2>&1
-                    herdr agent wait "${name}" --until idle --timeout 30000 > /dev/null 2>&1 && ready=1
+                # 既定のカーソルは「No, exit」にあることがあり、Enter だけ送ると Claude が終了する。
+                # 「Yes, I trust this folder」にカーソルを合わせ、合ったことを確かめてから確定する。
+                local screen tries=0
+                screen=$(herdr agent read "${name}" --source detection --lines 40 2>/dev/null)
+                if [[ "${screen}" == *"I trust this folder"* ]]; then
+                    while [[ "${screen}" != *"❯ Yes, I trust this folder"* ]] && (( tries++ < 3 )); do
+                        herdr agent send-keys "${name}" down > /dev/null 2>&1
+                        sleep 0.3
+                        screen=$(herdr agent read "${name}" --source detection --lines 40 2>/dev/null)
+                    done
+                    if [[ "${screen}" == *"❯ Yes, I trust this folder"* ]]; then
+                        herdr agent send-keys "${name}" enter > /dev/null 2>&1
+                        herdr agent wait "${name}" --until idle --timeout 30000 > /dev/null 2>&1 && ready=1
+                    else
+                        echo "gwt: フォルダ信頼の確認で「Yes」を選べませんでした。workspace ${workspace} を開いて確認してください。" >&2
+                    fi
                 else
                     echo "gwt: agent '${name}' が入力待ちです。workspace ${workspace} を開いて確認してください。" >&2
                 fi
