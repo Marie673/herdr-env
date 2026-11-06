@@ -1,0 +1,36 @@
+id = "issue-board"
+name = "Issue Board"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "指定したリポジトリの main の space で、右側に GitHub の issue 一覧（fzf）を出す。Enter で gwt して着手"
+platforms = ["macos"]
+
+# 対象のリポジトリは $HERDR_PLUGIN_CONFIG_DIR/config.json の repos（既定 ["ai-president-next"]）
+
+[[startup]]
+command = ["/usr/bin/python3", "bin/ensure.py", "startup"]
+
+# main の space に来たとき・その中でタブを移ったときに、そのタブの右に一覧が無ければ開く
+[[events]]
+on = "workspace.focused"
+command = ["/usr/bin/python3", "bin/ensure.py", "event"]
+
+[[events]]
+on = "tab.focused"
+command = ["/usr/bin/python3", "bin/ensure.py", "event"]
+
+[[events]]
+on = "tab.created"
+command = ["/usr/bin/python3", "bin/ensure.py", "event"]
+
+[[panes]]
+id = "board"
+title = "Issues"
+placement = "split"
+command = ["/bin/bash", "bin/board.sh"]
+
+[[actions]]
+id = "toggle"
+title = "issue 一覧の表示を切り替える（この space）"
+contexts = ["workspace"]
+command = ["/usr/bin/python3", "bin/ensure.py", "toggle"]

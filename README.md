@@ -40,6 +40,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/plugins/local/pane-id-copy/` | `~/.config/herdr/plugins/local/pane-id-copy/` |
 | `herdr/plugins/local/pr-status/` | `~/.config/herdr/plugins/local/pr-status/` + `~/.local/bin/herdr-pr-status` へ symlink |
 | `herdr/plugins/local/worktree-setup/` | `~/.config/herdr/plugins/local/worktree-setup/` |
+| `herdr/plugins/local/issue-board/` | `~/.config/herdr/plugins/local/issue-board/` |
 | `launchd/dev.marie673.herdr-pr-status.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `zsh/gwq-herdr.zsh` | 任意の場所に置き `.zshrc` から `source` |
 | `git/hooks/reference-transaction` | `~/.config/git/hooks/reference-transaction`（要 `chmod +x`） |
@@ -217,11 +218,13 @@ cp -R herdr/plugins/local/pane-title-sync  ~/.config/herdr/plugins/local/
 cp -R herdr/plugins/local/pane-id-copy     ~/.config/herdr/plugins/local/
 cp -R herdr/plugins/local/pr-status        ~/.config/herdr/plugins/local/
 cp -R herdr/plugins/local/worktree-setup   ~/.config/herdr/plugins/local/
+cp -R herdr/plugins/local/issue-board      ~/.config/herdr/plugins/local/
 herdr plugin link ~/.config/herdr/plugins/local/agent-view-space
 herdr plugin link ~/.config/herdr/plugins/local/pane-title-sync
 herdr plugin link ~/.config/herdr/plugins/local/pane-id-copy
 herdr plugin link ~/.config/herdr/plugins/local/pr-status
 herdr plugin link ~/.config/herdr/plugins/local/worktree-setup
+herdr plugin link ~/.config/herdr/plugins/local/issue-board
 ln -sf ~/.config/herdr/plugins/local/pr-status/bin/pr_status.py ~/.local/bin/herdr-pr-status
 ```
 
@@ -310,6 +313,25 @@ done
 やり直すときは、その space でプラグインアクション「このワークツリーのセットアップをやり直す」（`herdr plugin action invoke worktree-setup.rerun`）。
 
 space が閉じたとき・ワークツリーが消えたとき（`workspace.closed` / `worktree.removed`）は `gwt-tasks prune` を走らせて、agent もワークツリーも無くなった依頼を台帳から外す。
+
+#### issue-board: main の space の右に issue 一覧を出す
+
+対象リポジトリ（既定 `ai-president-next`）の **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
+
+| キー | 動き |
+|---|---|
+| `↵` | 着手。ブランチ `issue-<番号>` を `gwt --task` で切り、新しい space の Claude Code に issue を渡す（確認あり）。番号入りのワークツリーが既にあれば、その space へ移るだけ |
+| `^o` | ブラウザで開く |
+| `^r` | 取り直す（普段は3分ごとに自動、キャッシュは90秒） |
+| `^p` | プレビュー（本文と最新コメント2件）の表示切り替え |
+
+ワークツリーのブランチ名に番号が入っている issue には `●` が付く。着手時は `HERDR_PANE_ID` を外して `gwt` を呼ぶので、依頼元はこの一覧ペインにならず、agent の質問は人間に来る。
+
+- 出し入れ: `prefix+shift+i`（`issue-board.toggle`）。消した space では自動で開かなくなる
+- 対象と幅: `$(herdr plugin config-dir issue-board)/config.json` に `{"repos": ["ai-president-next"], "width": 0.34}`
+- herdr のペイン情報にはプラグインの所有者が出ないので、開いたペインは `~/.local/state/herdr/plugins/issue-board/state.json` に tab_id → pane_id で覚えている
+- `--cwd` を付けて `plugin pane open` すると、マニフェストの相対パス（`bin/board.sh`）が解決できずに即終了する。リポジトリは環境変数 `ISSUE_BOARD_REPO_ROOT` で渡している
+- `pane resize --amount` はタブ幅に対する割合で、`0` を渡すと変えずにレイアウトだけ返る。これで今の幅を測ってから合わせている
 
 ### 7. Herdr × Claude Code 連携
 

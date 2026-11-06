@@ -170,3 +170,10 @@ key = "prefix+shift+c"
 type = "plugin_action"
 command = "pane-id-copy.copy"
 description = "copy this pane's id to the clipboard"
+
+# issue 一覧（issue-board プラグイン）。対象リポジトリの main の space で右に出す。この space での出し入れ
+[[keys.command]]
+key = "prefix+shift+i"
+type = "plugin_action"
+command = "issue-board.toggle"
+description = "toggle the issue board in this space"
