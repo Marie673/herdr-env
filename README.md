@@ -314,16 +314,21 @@ done
 
 space が閉じたとき・ワークツリーが消えたとき（`workspace.closed` / `worktree.removed`）は `gwt-tasks prune` を走らせて、agent もワークツリーも無くなった依頼を台帳から外す。
 
-#### issue-board: main の space の右に issue 一覧を出す
+#### issue-board: main の space の右に issue / PR 一覧を出す
 
-対象リポジトリ（既定 `ai-president-next`）の **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
+対象リポジトリ（既定 `ai-president-next`）の **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。`^t` で open な PR の一覧に切り替わる。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
 
 | キー | 動き |
 |---|---|
 | `↵` | 着手。タイトルから haiku がブランチ名 `<type>/<english-slug>-<番号>`（例 `feat/persist-selected-ai-president-351`）を作り、確認画面で直してから `gwt --task` で切って、新しい space の Claude Code に issue を渡す。ブランチ名がそのまま space 名になるので、内容が分かる名前にしている。番号入りのワークツリーが既にあれば、その space へ移るだけ |
+| `^t` | issue と PR を切り替える |
 | `^o` | ブラウザで開く |
 | `^r` | 取り直す（普段は3分ごとに自動、キャッシュは90秒） |
 | `^p` | プレビュー（本文と最新コメント2件）の表示切り替え |
+
+PR の一覧（`^t`）は、pr-status と同じ GraphQL 1回で取り、行に状態を並べる: `● #485 競合 CR✓ 未解決1 feat(knowledge): … @Marie673`（`●` はそのブランチのワークツリーがある）。プレビューは checks（失敗・実行中が上）と本文で、一覧のキャッシュから出すので gh は呼ばない。`↵` はそのブランチの space へ移る。space が無ければ「Claude Code つきで開く / シェルだけで開く（見るだけ）」を選んで `gwt` する（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）。
+
+モード（issue / PR）は一覧ペインごとに state のファイルで持ち、`^t` は `transform(mode.sh switch)` 1つで切り替える。`execute-silent(...)+reload(...)+transform-prompt(...)` のように reload の後ろに操作をつなぐと、読み込み中に押したときに後ろの操作（プロンプトの更新など）が落ちることがあった。
 
 ワークツリーのブランチ名に番号が入っている issue には `●` が付く。ブランチ名を作る `claude -p` は `--setting-sources project` で一時ディレクトリから呼び、自分の hooks（herdr への状態報告など）を走らせない（`--bare` だとログイン情報も読まれず失敗する）。着手時は `HERDR_PANE_ID` を外して `gwt` を呼ぶので、依頼元はこの一覧ペインにならず、agent の質問は人間に来る。
 

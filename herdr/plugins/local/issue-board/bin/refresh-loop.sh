@@ -7,5 +7,5 @@ while sleep "${1:-180}"; do
   if [ -n "${HERDR_PANE_ID:-}" ] && "$herdr" pane get "$HERDR_PANE_ID" 2>&1 | grep -q pane_not_found; then
     kill 0
   fi
-  curl -fs -XPOST "localhost:${FZF_PORT:?}" -d "reload($dir/issues.sh --fresh)" >/dev/null || exit 0
+  curl -fs -XPOST "localhost:${FZF_PORT:?}" -d "reload($dir/list.sh --fresh)" >/dev/null || exit 0
 done
