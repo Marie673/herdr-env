@@ -320,12 +320,12 @@ space が閉じたとき・ワークツリーが消えたとき（`workspace.clo
 
 | キー | 動き |
 |---|---|
-| `↵` | 着手。ブランチ `issue-<番号>` を `gwt --task` で切り、新しい space の Claude Code に issue を渡す（確認あり）。番号入りのワークツリーが既にあれば、その space へ移るだけ |
+| `↵` | 着手。タイトルから haiku がブランチ名 `<type>/<english-slug>-<番号>`（例 `feat/persist-selected-ai-president-351`）を作り、確認画面で直してから `gwt --task` で切って、新しい space の Claude Code に issue を渡す。ブランチ名がそのまま space 名になるので、内容が分かる名前にしている。番号入りのワークツリーが既にあれば、その space へ移るだけ |
 | `^o` | ブラウザで開く |
 | `^r` | 取り直す（普段は3分ごとに自動、キャッシュは90秒） |
 | `^p` | プレビュー（本文と最新コメント2件）の表示切り替え |
 
-ワークツリーのブランチ名に番号が入っている issue には `●` が付く。着手時は `HERDR_PANE_ID` を外して `gwt` を呼ぶので、依頼元はこの一覧ペインにならず、agent の質問は人間に来る。
+ワークツリーのブランチ名に番号が入っている issue には `●` が付く。ブランチ名を作る `claude -p` は `--setting-sources project` で一時ディレクトリから呼び、自分の hooks（herdr への状態報告など）を走らせない（`--bare` だとログイン情報も読まれず失敗する）。着手時は `HERDR_PANE_ID` を外して `gwt` を呼ぶので、依頼元はこの一覧ペインにならず、agent の質問は人間に来る。
 
 - 出し入れ: `prefix+shift+i`（`issue-board.toggle`）。消した space では自動で開かなくなる
 - 対象と幅: `$(herdr plugin config-dir issue-board)/config.json` に `{"repos": ["ai-president-next"], "width": 0.34}`
