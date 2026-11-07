@@ -20,7 +20,7 @@ while :; do
     --header "$("$dir/mode.sh" header)" \
     --preview "$dir/preview.sh {1}" \
     --preview-window 'down,55%,wrap,border-top' \
-    --bind "start:execute-silent($dir/refresh-loop.sh 180 >/dev/null 2>&1 &)" \
+    --bind "start:execute-silent($dir/refresh-loop.sh 60 >/dev/null 2>&1 &)" \
     --bind "ctrl-t:transform($dir/mode.sh switch)" \
     --bind "ctrl-r:reload($dir/list.sh --fresh)" \
     --bind "ctrl-o:execute-silent($dir/open.sh {1})" \

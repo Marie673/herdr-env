@@ -1,6 +1,7 @@
 #!/bin/bash
 # open な PR の一覧を fzf の行にして出す。1行 = "<番号>\t<表示>"
-#   prs.sh [--fresh]   キャッシュ（リポジトリごとに90秒）を使わず gh を引き直す
+#   prs.sh [--fresh]   キャッシュ（リポジトリごと・全一覧で共有、30秒）を使わず gh を引き直す
+# 並びは作成の新しい順（番号の大きい順）
 #   prs.sh --json      キャッシュの JSON をそのまま出す（pr-preview.sh / pr-open.sh 用）
 # 表示: ●（ワークツリーあり） #番号 状態（draft 競合 CI CR 要修正/未解決/承認） タイトル @作成者
 set -u
@@ -12,7 +13,7 @@ cache="$cache_dir/prs-$(printf '%s' "$root" | shasum | cut -c1-12).json"
 read -r -d '' QUERY <<'GQL'
 query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
-    pullRequests(states: OPEN, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) {
+    pullRequests(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
       nodes {
         number title body url headRefName isDraft isCrossRepository reviewDecision mergeable updatedAt
         author { login }
@@ -30,7 +31,7 @@ GQL
 
 age=999999
 [ -f "$cache" ] && age=$(( $(date +%s) - $(stat -f %m "$cache") ))
-if [ "${1:-}" = --fresh ] || { [ "$age" -gt 90 ] && [ "${1:-}" != --json ]; }; then
+if [ "${1:-}" = --fresh ] || { [ "$age" -gt 30 ] && [ "${1:-}" != --json ]; }; then
   if out=$(cd "$root" && gh api graphql -F owner='{owner}' -F repo='{repo}' -f query="$QUERY" 2>/dev/null); then
     printf '%s' "$out" | jq '.data.repository.pullRequests.nodes' > "$cache.tmp" && mv "$cache.tmp" "$cache"
   fi

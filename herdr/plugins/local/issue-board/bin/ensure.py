@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 
 PLUGIN = "issue-board"
 HOME = os.path.expanduser("~")
@@ -135,8 +136,27 @@ def ensure(st, ws_id, conf):
     if not ws:
         return
     tab_id = ws.get("active_tab_id")
-    if tab_id and not board_alive(st, tab_id):
+    if not tab_id:
+        return
+    if board_alive(st, tab_id):
+        poke(st["boards"][tab_id])
+    else:
         open_board(st, ws, tab_id, conf)
+
+
+def poke(pane_id):
+    """タブに来たら、その一覧にすぐ reload を送る（gh を呼ぶかは list.sh の共有キャッシュ次第）"""
+    try:
+        with open(os.path.join(STATE_DIR, "port-" + pane_id.replace(":", "_"))) as f:
+            port = int(f.read().strip())
+    except (OSError, ValueError):
+        return
+    req = urllib.request.Request("http://localhost:%d" % port, method="POST",
+                                 data=("reload(%s/list.sh)" % os.path.dirname(os.path.abspath(__file__))).encode())
+    try:
+        urllib.request.urlopen(req, timeout=2).read()
+    except Exception:
+        pass
 
 
 def event_workspace():

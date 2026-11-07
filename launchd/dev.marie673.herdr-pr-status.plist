@@ -24,9 +24,9 @@
     <string>/Users/okazaki/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 
-  <!-- 3分ごと。トークンの TTL は30分なので、止まれば古い表示は自然に消える。 -->
+  <!-- 毎分（gh は1回あたり GraphQL 3ポイント、リポジトリごとに1回）。トークンの TTL は30分なので、止まれば古い表示は自然に消える。 -->
   <key>StartInterval</key>
-  <integer>180</integer>
+  <integer>60</integer>
 
   <key>StandardOutPath</key>
   <string>/Users/okazaki/.local/state/herdr-pr-status/launchd.log</string>

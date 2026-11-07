@@ -23,3 +23,8 @@ id = "sync"
 title = "PR 状態を全部取り直す"
 contexts = ["workspace"]
 command = ["/usr/bin/python3", "bin/pr_status.py", "sync", "--all", "--fresh"]
+
+# agent が1ターン終えたら（idle / done）、その space の PR を取り直す。push・PR 作成・指摘対応の直後に表示を合わせる
+[[events]]
+on = "pane.agent_status_changed"
+command = ["/usr/bin/python3", "bin/pr_status.py", "event"]

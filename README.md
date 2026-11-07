@@ -272,9 +272,10 @@ Herdr 0.8.2 では config の `agent_panel_scope` は**効かない**（パー�
 取り直すタイミング:
 
 - herdr の起動時（`[[startup]]`、metadata はサーバ再起動で消えるため）
-- ワークツリーを開いたとき（`worktree.opened`）と、space にフォーカスしたとき（`workspace.focused`、90秒以内に取った結果があればそれを使う）
+- ワークツリーを開いたとき（`worktree.opened`）と、space にフォーカスしたとき（`workspace.focused`、60秒以内に取った結果があればそれを使う）
+- その space の agent が1ターン終えたとき（`pane.agent_status_changed` で idle / done。push・PR 作成・指摘対応の直後。15秒以内の結果は使い回す）
 - `gh-ci-wait` の checks の状態が変わったときと、終わったとき（`herdr-pr-status sync --path "$PWD" --fresh`）
-- launchd で3分ごと（見ていない space のレビューや merge を拾う）
+- launchd で毎分（見ていない space のレビューや merge を拾う。GraphQL は1回3ポイントで、リポジトリごとに1回）
 
 ```sh
 cp launchd/dev.marie673.herdr-pr-status.plist ~/Library/LaunchAgents/
@@ -316,14 +317,14 @@ space が閉じたとき・ワークツリーが消えたとき（`workspace.clo
 
 #### issue-board: main の space の右に issue / PR 一覧を出す
 
-対象リポジトリ（既定 `ai-president-next`）の **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。`^t` で open な PR の一覧に切り替わる。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
+対象リポジトリ（既定 `ai-president-next`）の **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。`^t` で open な PR の一覧（作成の新しい順）に切り替わる。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
 
 | キー | 動き |
 |---|---|
 | `↵` | 着手。タイトルから haiku がブランチ名 `<type>/<english-slug>-<番号>`（例 `feat/persist-selected-ai-president-351`）を作り、確認画面で直してから `gwt --task` で切って、新しい space の Claude Code に issue を渡す。ブランチ名がそのまま space 名になるので、内容が分かる名前にしている。番号入りのワークツリーが既にあれば、その space へ移るだけ |
 | `^t` | issue と PR を切り替える |
 | `^o` | ブラウザで開く |
-| `^r` | 取り直す（普段は3分ごとに自動、キャッシュは90秒） |
+| `^r` | 取り直す（普段は1分ごとと、そのタブに来たときに自動。gh の結果は全一覧で共有して30秒使い回す） |
 | `^p` | プレビュー（本文と最新コメント2件）の表示切り替え |
 
 PR の一覧（`^t`）は、pr-status と同じ GraphQL 1回で取り、行に状態を並べる: `● #485 競合 CR✓ 未解決1 feat(knowledge): … @Marie673`（`●` はそのブランチのワークツリーがある）。プレビューは checks（失敗・実行中が上）と本文で、一覧のキャッシュから出すので gh は呼ばない。`↵` はそのブランチの space へ移る。space が無ければ「Claude Code つきで開く / シェルだけで開く（見るだけ）」を選んで `gwt` する（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）。

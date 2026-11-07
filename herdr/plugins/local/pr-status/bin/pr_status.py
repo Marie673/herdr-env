@@ -4,7 +4,8 @@
   pr_status.py sync --all [--fresh]       全ワークツリーの space を付け直す（startup / launchd）
   pr_status.py sync --workspace <id>      1つの space だけ
   pr_status.py sync --path <dir> [--fresh]  そのディレクトリを含むワークツリーの space（gh-ci-wait から）
-  pr_status.py event                      プラグインのイベントフック（worktree.opened / workspace.focused）
+  pr_status.py event                      プラグインのイベントフック（worktree.opened / workspace.focused /
+                                          pane.agent_status_changed で idle・done になったとき）
 
 出すトークン（workspace.report_metadata、source = plugin:pr-status）:
   $pr  "#123" / "#123 draft" / "#123 競合" / "#123 merged" / "#123 closed"
@@ -27,7 +28,10 @@ import time
 SOURCE = "plugin:pr-status"
 TOKENS = ("pr", "ci", "rv")
 TTL_MS = 30 * 60 * 1000          # 定期実行が止まったら30分で消える
-REPO_CACHE_SEC = 90              # フォーカスのたびに gh を叩かない
+# 前回の取得からこの秒数以内なら gh を呼ばずにキャッシュを使う（呼び出し元ごと）
+MAX_AGE_SYNC = 30                # sync（launchd は毎分）
+MAX_AGE_FOCUS = 60               # space にフォーカスしたとき
+MAX_AGE_AGENT = 15               # agent が止まったとき（push や PR 作成の直後）
 NONE_RECHECK_SEC = 10 * 60       # PR 無しのブランチを引き直す間隔
 TERMINAL_RECHECK_SEC = 6 * 3600  # merged / closed を引き直す間隔（同じブランチで PR を作り直したとき用）
 CODERABBIT = "coderabbit"
@@ -126,9 +130,9 @@ def current_branch(path):
 
 # ---------- GitHub ----------
 
-def fetch_open_prs(repo_root, st, fresh):
+def fetch_open_prs(repo_root, st, max_age):
     cache = st.setdefault("open", {}).get(repo_root)
-    if cache and not fresh and time.time() - cache["at"] < REPO_CACHE_SEC:
+    if cache and time.time() - cache["at"] < max_age:
         return cache["prs"]
     out = run([GH, "api", "graphql", "-F", "owner={owner}", "-F", "repo={repo}", "-f", "query=" + QUERY],
               cwd=repo_root, timeout=60)
@@ -261,7 +265,7 @@ def report(workspace_id, tokens):
 
 # ---------- 本体 ----------
 
-def sync(targets, fresh):
+def sync(targets, max_age):
     """targets: [(workspace_id, checkout_path, repo_root)]"""
     if not targets:
         return
@@ -273,7 +277,7 @@ def sync(targets, fresh):
         for t in targets:
             by_repo.setdefault(t[2], []).append(t)
         for repo_root, items in by_repo.items():
-            prs = fetch_open_prs(repo_root, st, fresh)
+            prs = fetch_open_prs(repo_root, st, max_age)
             if prs is None:
                 continue  # gh が使えないときは前の表示を残す（TTL で消える）
             for ws_id, path, _ in items:
@@ -318,13 +322,36 @@ def cmd_event():
     except ValueError:
         ev = {}
     kind = os.environ.get("HERDR_PLUGIN_EVENT", "")
-    ws = find_key(ev, "workspace") or {}
-    ws_id = ws.get("workspace_id") or os.environ.get("HERDR_WORKSPACE_ID")
+    if kind == "pane.agent_status_changed":
+        # agent が1ターン終えたときだけ（push・PR 作成・指摘対応はたいていターンの中で終わる）
+        if find_value(ev, "agent_status") not in ("idle", "done"):
+            return
+        max_age = MAX_AGE_AGENT
+    elif kind.startswith("worktree"):
+        max_age = 0  # 開いた直後は引き直す
+    else:
+        max_age = MAX_AGE_FOCUS
+    ws_id = find_value(ev, "workspace_id") or os.environ.get("HERDR_WORKSPACE_ID")
     if not ws_id:
         return
     targets = [t for t in worktree_workspaces() if t[0] == ws_id]
-    # 開いた直後は gh を引き直す。フォーカスはキャッシュが新しければそれを使う
-    sync(targets, fresh=kind.startswith("worktree"))
+    sync(targets, max_age)
+
+
+def find_value(obj, key):
+    if isinstance(obj, dict):
+        if isinstance(obj.get(key), str):
+            return obj[key]
+        for v in obj.values():
+            r = find_value(v, key)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = find_value(v, key)
+            if r is not None:
+                return r
+    return None
 
 
 def main():
@@ -336,6 +363,7 @@ def main():
     g.add_argument("--workspace")
     g.add_argument("--path")
     p.add_argument("--fresh", action="store_true", help="キャッシュを使わず gh を引き直す")
+    p.add_argument("--max-age", type=int, default=MAX_AGE_SYNC, help="この秒数以内に取った結果があれば使う")
     sub.add_parser("event")
     args = ap.parse_args()
 
@@ -348,7 +376,7 @@ def main():
             targets = [t for t in worktree_workspaces() if t[0] == args.workspace]
         else:
             targets = find_by_path(args.path)
-        sync(targets, args.fresh)
+        sync(targets, 0 if args.fresh else args.max_age)
     else:
         ap.print_help()
         return 2

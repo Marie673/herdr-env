@@ -1,6 +1,6 @@
 #!/bin/bash
 # issue 一覧を fzf の行にして出す。1行 = "<番号>\t<表示>"
-#   issues.sh [--fresh]   キャッシュ（リポジトリごとに90秒）を使わず gh を引き直す
+#   issues.sh [--fresh]   キャッシュ（リポジトリごと・全一覧で共有、30秒）を使わず gh を引き直す
 # ワークツリーのブランチ名に番号が入っている issue には ● を付ける（着手済みの目印）
 set -u
 root="${ISSUE_BOARD_REPO_ROOT:-$PWD}"
@@ -10,7 +10,7 @@ cache="$cache_dir/issues-$(printf '%s' "$root" | shasum | cut -c1-12).json"
 
 age=999999
 [ -f "$cache" ] && age=$(( $(date +%s) - $(stat -f %m "$cache") ))
-if [ "${1:-}" = --fresh ] || [ "$age" -gt 90 ]; then
+if [ "${1:-}" = --fresh ] || [ "$age" -gt 30 ]; then
   if out=$(cd "$root" && gh issue list --state open --limit 200 \
              --json number,title,labels 2>/dev/null); then
     printf '%s' "$out" > "$cache.tmp" && mv "$cache.tmp" "$cache"
