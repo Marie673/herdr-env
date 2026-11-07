@@ -32,7 +32,7 @@ HERDR = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr") or "/opt/homeb
 GIT = shutil.which("git") or "/usr/bin/git"
 MISE = shutil.which("mise") or ("/opt/homebrew/bin/mise" if os.path.exists("/opt/homebrew/bin/mise") else None)
 CONFIG_DIR = os.environ.get("HERDR_PLUGIN_CONFIG_DIR") or os.path.join(HOME, ".config/herdr/plugins/config/worktree-setup")
-STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(HOME, ".local/state/herdr-worktree-setup")
+STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(HOME, ".local/state/herdr/plugins/worktree-setup")
 INSTALL_TIMEOUT = 20 * 60
 
 DEFAULTS = {
