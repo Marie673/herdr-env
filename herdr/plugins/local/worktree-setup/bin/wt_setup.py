@@ -110,9 +110,10 @@ def child_env():
     return env
 
 
-def run_cmd(argv, cwd, log, timeout=INSTALL_TIMEOUT):
+def run_cmd(argv, cwd, log, timeout=INSTALL_TIMEOUT, tools=()):
+    """tools: mise exec に渡すツール指定（例 "node@26.13.0"）。mise は .nvmrc などを読まない設定なので明示する"""
     if MISE and argv[0] != MISE:
-        argv = [MISE, "exec", "--"] + argv
+        argv = [MISE, "exec"] + list(tools) + ["--"] + argv
     log("$ " + " ".join(argv))
     try:
         p = subprocess.run(argv, cwd=cwd, env=child_env(), stdin=subprocess.DEVNULL,
@@ -159,6 +160,19 @@ def copy_local_files(main, wt, conf, log):
     log("コピーしたファイル: %d" % copied)
 
 
+def node_version(wt):
+    """.node-version / .nvmrc のバージョン（"v26.13.0" → "26.13.0"）。lts/* などの別名は mise に任せず無視する"""
+    for name in (".node-version", ".nvmrc"):
+        try:
+            with open(os.path.join(wt, name)) as f:
+                v = f.read().strip().lstrip("v")
+        except OSError:
+            continue
+        if v and v[0].isdigit():
+            return v
+    return None
+
+
 def install_deps(wt, log):
     for lock, argv in INSTALLERS:
         if os.path.exists(os.path.join(wt, lock)):
@@ -167,7 +181,11 @@ def install_deps(wt, log):
             if os.path.isdir(installed):
                 log("%s が既にあるので依存のインストールは飛ばします" % os.path.basename(installed))
                 return True
-            return run_cmd(argv, wt, log)
+            tools = []
+            node = node_version(wt) if lock != "uv.lock" else None
+            if node:
+                tools.append("node@" + node)
+            return run_cmd(argv, wt, log, tools=tools)
     log("ルートに lockfile が無いので依存のインストールは飛ばします")
     return True
 

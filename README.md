@@ -290,7 +290,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.marie673.herdr-pr-st
 `gwt` は `herdr worktree open` を使うので、`worktree.opened`（herdr の create なら `worktree.created`）をフックして、初回だけ次をやる。
 
 1. main のチェックアウトで **git 管理外かつ .gitignore に当たっている**設定ファイル（`.env` / `.env.*` / `.envrc` / `.dev.vars` / `*.local.{toml,json,yaml,yml}`）を同じ相対パスへコピー。`.claude/settings.local.json` もここで付いてくる。ワークツリー側に既にあるものは上書きしない
-2. ルートの lockfile で依存を入れる（pnpm / npm / bun / yarn / uv の順、`mise exec --` 経由）。`node_modules` / `.venv` が既にあれば触らない
+2. ルートの lockfile で依存を入れる（pnpm / npm / bun / yarn / uv の順、`mise exec --` 経由）。`node_modules` / `.venv` が既にあれば触らない。JS は `.node-version` / `.nvmrc` があればそのバージョンを `mise exec node@<版> --` で明示する（mise は既定ではこれらを読まないので、全体の既定の Node で走って `EBADENGINE` で落ちたことがある）
 3. `config.json` の `setup` に書いたコマンドを実行
 
 「初回」の印は `<git-dir>/herdr-setup.json`（`.git/worktrees/<name>/` の中）なので、ワークツリーを消せば一緒に消える。実行中はその space の1行目に `⚙ setup`、失敗すると `✗ setup` と herdr の通知が出る。ログは `~/.local/state/herdr/plugins/worktree-setup/<ディレクトリ名>.log`。
