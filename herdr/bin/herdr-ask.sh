@@ -7,7 +7,7 @@
 #   herdr-ask caller            依頼元 agent の pane ID を出す（無ければ exit 1）
 #   herdr-ask send <本文>        依頼元へ質問・報告を送る（返答は依頼元が herdr agent prompt で返す）
 #   herdr-ask hook-question     Claude の PreToolUse(AskUserQuestion) フック。依頼元がいれば deny する
-#   herdr-ask hook-blocked      Claude の Notification フック。承認待ち等で止まったら依頼元へ知らせる
+#   herdr-ask hook-blocked      Claude の Notification フック。承認待ち・質問への回答待ちで止まったら依頼元へ知らせる
 #
 # HERDR_ASK_DRYRUN=1 なら送信せず、送る内容を標準出力に出す。
 
@@ -67,6 +67,14 @@ case "$action" in
 
   hook-blocked)
     input="$(cat 2>/dev/null)"
+    # 承認待ち・質問への回答待ちだけ知らせる。idle_prompt（ターンを終えて60秒入力が無い）は
+    # 止まっているのではなく終わっただけで、終わったことは本人が herdr-ask send で報告する。
+    # 種別が無い古い Claude は従来どおり知らせる。
+    kind="$(printf '%s' "$input" | jq -r '.notification_type // empty' 2>/dev/null)"
+    case "$kind" in
+      ""|permission_prompt|elicitation_dialog) ;;
+      *) exit 0 ;;
+    esac
     lookup || exit 0
     msg="$(printf '%s' "$input" | jq -r '.message // empty' 2>/dev/null)"
     [ -n "$msg" ] || exit 0
