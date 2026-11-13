@@ -1,0 +1,18 @@
+id = "claude-accounts"
+name = "Claude Accounts"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Claude Code の複数アカウント（CLAUDE_CONFIG_DIR）を選んで起動・切り替える。中身は claude-account コマンド"
+platforms = ["macos"]
+
+[[actions]]
+id = "pick"
+title = "Claude: アカウントを選んで起動 / このペインを切り替え"
+contexts = ["pane", "workspace", "global"]
+command = ["bash", "bin/open.sh"]
+
+[[panes]]
+id = "picker"
+title = "Claude Accounts"
+placement = "overlay"
+command = ["bash", "bin/pick.sh"]

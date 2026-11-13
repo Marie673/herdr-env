@@ -165,6 +165,12 @@ if [ -x "$HOME/.config/herdr/bin/herdr-wait.sh" ]; then
   fi
 fi
 
+# どのアカウントで動いているかと上限の残りを herdr のサイドバー（$acct）へ（claude-account）。
+# 待たずに切り離す。statusLine の表示を遅らせない
+if [ -n "${HERDR_PANE_ID:-}" ] && [ -x "$HOME/.local/bin/claude-account" ]; then
+  (printf '%s' "$input" | "$HOME/.local/bin/claude-account" hook statusline >/dev/null 2>&1 &)
+fi
+
 # 終了コードが 0 以外だと Claude Code はステータスラインを空表示にするため、
 # 直前の判定結果に関係なく 0 で終える。
 exit 0

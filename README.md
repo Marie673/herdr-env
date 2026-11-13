@@ -17,6 +17,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - **`herdr-ask` / `herdr-await`** が agent 同士の質問・承認を人間ではなく依頼元 agent に回す。依頼先は `herdr-ask send` で依頼元に聞き、依頼元は `herdr-await` で相手が止まるのを待つ（待っている間は自分の PID つきで `herdr-wait` の印を立て、終われば外す）。Claude は AskUserQuestion を PreToolUse フックで deny して誘導し、承認待ちは Notification フックで依頼元に知らせる（`herdr/bin/herdr-ask.sh`、`herdr/bin/herdr-await.sh`）。作業はシングル agent で続ける方針なので、`claude/CLAUDE.snippet.md` からは委譲の指示を外してある。これらは人が `gwt --task` で依頼したときのためのもので、依頼先への使い方は `gwt` が依頼文に添えて渡す。
 - **`gwt-tasks`** が「別 space の誰に何を任せたか」の台帳を持ち、herdr の状態と突き合わせて一覧にする（`herdr/bin/gwt-tasks.py`）。
 - **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
+- **`claude-account`** が Claude Code の複数アカウントを `CLAUDE_CONFIG_DIR` で使い分ける（`herdr/bin/claude-account.py`）。追加アカウントのディレクトリはログイン情報と `.claude.json` だけを持ち、設定・会話の記録は `~/.claude` を共有する。サイドバーにアカウントと上限の残りが出る。`prefix+shift+l` で、選んだアカウントで起動するか、今のペインの会話を同じ会話のまま別アカウントへ移せる（上限に達したとき用）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
@@ -34,6 +35,10 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `herdr/bin/herdr-ask.sh` | `~/.config/herdr/bin/herdr-ask.sh` + `~/.local/bin/herdr-ask` へ symlink |
 | `herdr/bin/herdr-await.sh` | `~/.config/herdr/bin/herdr-await.sh` + `~/.local/bin/herdr-await` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
+| `herdr/bin/claude-account.py` | `~/.config/herdr/bin/claude-account.py` + `~/.local/bin/claude-account` へ symlink |
+| `claude-accounts/accounts.example` | `~/.config/claude-accounts/accounts`（自分のアカウントに書き換える） |
+| `herdr/plugins/local/claude-accounts/` | `~/.config/herdr/plugins/local/claude-accounts/` |
+| `zsh/claude-account.zsh` | 任意の場所に置き `.zshrc` から `source`（`claude` 関数。`claude -A <id>`） |
 | `launchd/dev.marie673.wt-audit.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
 | `herdr/plugins/local/pane-title-sync/` | `~/.config/herdr/plugins/local/pane-title-sync/` |
@@ -421,6 +426,41 @@ cp claude/skills/herdr/SKILL.md ~/.claude/skills/herdr/
 ```
 
 （このスキルは `herdr --skill` の出力と同等のもの。最新版はそちらから取り直せる）
+
+#### 複数アカウント（claude-account）
+
+Claude Code のアカウント（Team・個人など）を herdr の上で使い分ける。考え方は [T3 Code](https://github.com/pingdotgg/t3code) の provider instance と同じ:
+
+- **アカウント = `CLAUDE_CONFIG_DIR`**。`HOME` は変えない。macOS ではログイン情報が Keychain にあり、項目名が `CLAUDE_CONFIG_DIR` ごとに変わるので、ディレクトリを分けるだけでログインが分かれる。
+- **既定のアカウントは `~/.claude` のまま `CLAUDE_CONFIG_DIR` を設定しない**。`CLAUDE_CONFIG_DIR=~/.claude` と明示すると Keychain の項目名が変わり、未ログイン扱いになる。
+- **追加アカウントは shadow ディレクトリ**（Codex の shadow home と同じ）。自分で持つのは `.claude.json`（ログイン先・MCP・フォルダの信頼）と、上限の集計などアカウント固有のものだけ。`settings.json`・`CLAUDE.md`・hooks・skills・plugins・`projects`（会話の記録と auto memory）・history は `~/.claude` への symlink。会話の記録を共有するので、同じ会話を別のアカウントで `--resume` できる。
+- 共有するもの・しないものは `claude-account.py` の `SHARED_DIRS` / `SHARED_FILES`。分からないものは共有しない。
+
+```sh
+install -m 755 herdr/bin/claude-account.py ~/.config/herdr/bin/
+ln -sf ~/.config/herdr/bin/claude-account.py ~/.local/bin/claude-account
+mkdir -p ~/.config/claude-accounts
+cp claude-accounts/accounts.example ~/.config/claude-accounts/accounts   # 自分のアカウントに書き換える
+claude-account init --all            # 追加アカウントのディレクトリと symlink を作る
+claude-account login personal        # アカウントごとにブラウザでログイン（使う組織を選ぶ）
+claude-account list                  # ログイン先の確認
+cp -R herdr/plugins/local/claude-accounts ~/.config/herdr/plugins/local/
+herdr plugin link ~/.config/herdr/plugins/local/claude-accounts
+```
+
+`.zshrc` から `zsh/claude-account.zsh` を `source` すると、`claude -A <id>` でアカウントを選んで起動できる。`settings-hooks.snippet.json` の SessionStart / SessionEnd と `statusline.sh` の末尾が、サイドバーの `$acct`（`🟪 Personal  5h 62%  7d 90%`）を出す。上限の残りは statusLine の入力（その claude プロセス自身の値）から取るので、アカウントを取り違えない。
+
+| 操作 | やり方 |
+|---|---|
+| 選んだアカウントで新しいタブに起動 | `prefix+shift+l` → Enter（`claude-account start <id>`） |
+| 今のペインの会話を別アカウントで続ける | `prefix+shift+l` → ctrl-s（`claude-account switch <id>`）。`/exit` して、そのペインのシェルに `CLAUDE_CONFIG_DIR` を入れ、同じ agent 名で `--resume` する |
+| シェルから | `claude -A <id>`、`eval "$(claude-account env <id>)"` |
+
+注意:
+
+- usagebar（Agent Usage）に `[[claude.profiles]]` を足すと、上限ペインと通知がアカウントごとになる。ただし usagebar はセッションのファイルがどのプロファイルの `projects` にあるかでペインのアカウントを決めるため、`projects` を共有していると判定が当たらない。サイドバーでは usagebar の `$limit` の代わりに `$acct` を使う。
+- 追加アカウントの `.claude.json` は、作るときに既定の `mcpServers` と信頼済みフォルダだけを写す。あとから既定に足した MCP サーバーは写らない。
+- 棚（herdr-shelf）を使っているなら、開き直すときは `claude-account of-session` でしまったときのアカウントを引く。
 
 ### 8. Claude Code へのワークフロー指示
 

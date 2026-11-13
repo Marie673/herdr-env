@@ -64,6 +64,27 @@
             "command": "\"$HOME/.claude/hooks/herdr-activity.sh\" clear"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/claude-account\" hook session-end",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|clear|compact|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/claude-account\" hook session-start",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }

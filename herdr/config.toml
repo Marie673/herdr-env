@@ -38,10 +38,10 @@ claude = [
   ],
   # $act は自作フック herdr-activity.sh が報告する「今やっている操作」
   [{ token = "$act", fg = "#f2f2f2", dim = false }],
-  [
-    { token = "$provider", fg = "#f2f2f2", dim = false },
-    { token = "$limit", fg = "#f2f2f2", dim = false },
-  ],
+  # どのアカウントで動いているかと、そのアカウントの上限の残り（claude-account が statusLine から出す）。
+  # usagebar の $limit は使わない。会話の記録をアカウント間で共有しているので、usagebar の
+  # ペイン→アカウントの判定が当たらない
+  [{ token = "$acct", fg = "#f2f2f2", bold = true, dim = false }],
   [{ token = "$context", fg = "#f2f2f2", dim = false }],
   [
     { token = "workspace", fg = "#f2f2f2", dim = false },
@@ -177,3 +177,11 @@ key = "prefix+shift+i"
 type = "plugin_action"
 command = "issue-board.toggle"
 description = "toggle the issue board in this space"
+
+# Claude のアカウント（claude-accounts プラグイン）。
+# 選んだアカウントで新しいタブに起動する／このペインの会話を別アカウントで開き直す
+[[keys.command]]
+key = "prefix+shift+l"
+type = "plugin_action"
+command = "claude-accounts.pick"
+description = "Claude account: start / switch"
