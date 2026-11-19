@@ -181,7 +181,7 @@ description = "toggle the issue board in this space"
 # Claude のアカウント（claude-accounts プラグイン）。
 # 選んだアカウントで新しいタブに起動する／このペインの会話を別アカウントで開き直す
 [[keys.command]]
-key = "prefix+shift+l"
+key = "prefix+shift+u"
 type = "plugin_action"
 command = "claude-accounts.pick"
 description = "Claude account: start / switch"

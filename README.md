@@ -17,7 +17,7 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 - **`herdr-ask` / `herdr-await`** が agent 同士の質問・承認を人間ではなく依頼元 agent に回す。依頼先は `herdr-ask send` で依頼元に聞き、依頼元は `herdr-await` で相手が止まるのを待つ（待っている間は自分の PID つきで `herdr-wait` の印を立て、終われば外す）。Claude は AskUserQuestion を PreToolUse フックで deny して誘導し、承認待ちは Notification フックで依頼元に知らせる（`herdr/bin/herdr-ask.sh`、`herdr/bin/herdr-await.sh`）。作業はシングル agent で続ける方針なので、`claude/CLAUDE.snippet.md` からは委譲の指示を外してある。これらは人が `gwt --task` で依頼したときのためのもので、依頼先への使い方は `gwt` が依頼文に添えて渡す。
 - **`gwt-tasks`** が「別 space の誰に何を任せたか」の台帳を持ち、herdr の状態と突き合わせて一覧にする（`herdr/bin/gwt-tasks.py`）。
 - **`wt-audit`** が終わった作業のワークツリーを棚卸しして片付ける（`herdr/bin/wt-audit.sh`）。
-- **`claude-account`** が Claude Code の複数アカウントを `CLAUDE_CONFIG_DIR` で使い分ける（`herdr/bin/claude-account.py`）。追加アカウントのディレクトリはログイン情報と `.claude.json` だけを持ち、設定・会話の記録は `~/.claude` を共有する。サイドバーにアカウントと上限の残りが出る。`prefix+shift+l` で、選んだアカウントで起動するか、今のペインの会話を同じ会話のまま別アカウントへ移せる（上限に達したとき用）。
+- **`claude-account`** が Claude Code の複数アカウントを `CLAUDE_CONFIG_DIR` で使い分ける（`herdr/bin/claude-account.py`）。追加アカウントのディレクトリはログイン情報と `.claude.json` だけを持ち、設定・会話の記録は `~/.claude` を共有する。サイドバーにアカウントと上限の残りが出る。`prefix+shift+u` で、選んだアカウントで起動するか、今のペインの会話を同じ会話のまま別アカウントへ移せる（上限に達したとき用）。
 - ローカルプラグイン3つがサイドバーの使い勝手を補完する:
   - **agent-view-space**: agents ペインを「現在の space のエージェントだけ」に絞る（`prefix+shift+a` でトグル）
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
@@ -452,8 +452,8 @@ herdr plugin link ~/.config/herdr/plugins/local/claude-accounts
 
 | 操作 | やり方 |
 |---|---|
-| 選んだアカウントで新しいタブに起動 | `prefix+shift+l` → Enter（`claude-account start <id>`） |
-| 今のペインの会話を別アカウントで続ける | `prefix+shift+l` → ctrl-s（`claude-account switch <id>`）。`/exit` して、そのペインのシェルに `CLAUDE_CONFIG_DIR` を入れ、同じ agent 名で `--resume` する |
+| 選んだアカウントで新しいタブに起動 | `prefix+shift+u` → Enter（`claude-account start <id>`） |
+| 今のペインの会話を別アカウントで続ける | `prefix+shift+u` → ctrl-s（`claude-account switch <id>`）。`/exit` して、そのペインのシェルに `CLAUDE_CONFIG_DIR` を入れ、同じ agent 名で `--resume` する |
 | シェルから | `claude -A <id>`、`eval "$(claude-account env <id>)"` |
 
 注意:
