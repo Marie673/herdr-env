@@ -8,6 +8,11 @@ herdr-env では Agents 欄を「選んでいる Space だけ」に絞るので�
   動作中 = スピナー / 要対応（blocked）= ! / 完了・未確認（done）= 点
   💬 = 人間の返事待ち（Stop フックの旗）/ ⏳ = 外部待ち（herdr-wait）… hc のラベル herdr-env.* から
 
+worktree の Space には、そのブランチの PR の状態も名前の後ろに出す（TUI の pr-status と同じ文言）:
+
+  #123 / #123 draft / #123 競合 / #123 merged / #123 closed、CI ✓ / CI … / CI ✗2、CR ✓ 要修正 など
+  … pr-status（herdr/plugins/local/pr-status）が毎分書く hc のラベル herdr-env.pr / ci / rv から。30分で失効
+
 Herdr 標準の mod はコードを配らず、`herdr-app do mod.clone` で複製して必要な所だけ書き換える
 （Herdr を更新したら、このスクリプトをもう一度流す）。
 
@@ -83,6 +88,29 @@ patch('          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),\
 patch('  render() {\n    const t = theme();\n',
       '  render() {\n    const t = theme();\n    this.marks = envMarks();\n',
       "render")
+
+# 4. PR の状態（pr-status が書くラベル herdr-env.pr / ci / rv / pr_at）を印と一緒に読み、名前の後ろに出す
+patch('    if (l["herdr-env.wait"] && s && now - s < TTL) m.wait = true;\n',
+      '    if (l["herdr-env.wait"] && s && now - s < TTL) m.wait = true;\n'
+      '    const at = Number(l["herdr-env.pr_at"] || 0);\n'
+      '    if (!m.pr && at && now - at < 30 * 60 && (l["herdr-env.pr"] || l["herdr-env.ci"] || l["herdr-env.rv"]))\n'
+      '      m.pr = { pr: l["herdr-env.pr"] || "", ci: l["herdr-env.ci"] || "", rv: l["herdr-env.rv"] || "" };\n',
+      "pr labels")
+patch('// herdr-env: 行末の状態。',
+      """// herdr-env: PR の状態（pr-status のラベル）。悪いものは赤、待ちは黄、通ったものは緑、merged は紫、closed は薄く
+function prTail(t, p) {
+  const bad = /競合|✗|要修正|未解決/, wait = /…|draft/, good = /✓|承認/;
+  const tone = (s) => /merged/.test(s) ? t.ansi5 : /closed/.test(s) ? t.dim : bad.test(s) ? t.ansi1 : wait.test(s) ? t.ansi3 : good.test(s) ? t.ansi2 : t.dim;
+  return h_flex().flex_none().gap(5).items_center().text_size(11.5)
+    .children([p.pr, p.ci, p.rv].filter(Boolean).map((s) => div().flex_none().text_color(tone(s)).child(s)));
+}
+
+// herdr-env: 行末の状態。""",
+      "prTail")
+patch('          .when(Boolean(stateMark(t, w.status, this.marks?.get(w.id))), ',
+      '          .when(Boolean(this.marks?.get(w.id)?.pr), (el) => el.child(prTail(t, this.marks.get(w.id).pr)))\n'
+      '          .when(Boolean(stateMark(t, w.status, this.marks?.get(w.id))), ',
+      "row pr")
 
 open(path, "w", encoding="utf-8").write(src)
 with open(os.path.join(dest, "mod.json"), "w", encoding="utf-8") as f:

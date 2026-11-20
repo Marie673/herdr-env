@@ -69,6 +69,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | agents 一覧を選んでいる Space だけにする（agent-view-space） | mod `agents-env`。標準の agents を `herdr-app do mod.clone` で複製し、`herdr-app/agents-env.py` が絞り込みを足す。見出しのフォルダのボタンか `cmd+shift+a` で「この Space / 全部」を切り替える |
 | `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す |
 | Space ごとの agent の状態 | mod `spaces-env`。標準の Spaces 一覧は畳んだときしか状態を出さず、全体は Agents 欄で見る作り。Agents を絞るとほかの Space が見えなくなるので、各行の右端に状態を出す（動作中 = スピナー、要対応 = !、返事待ち = 💬、完了 = 点、外部待ち = ⏳）。`herdr-app/spaces-env.py` が標準の spaces を複製して書き換える |
+| pr-status（worktree の Space に PR の状態） | 同じ `pr_status.py` が、GUI の worktree の Space のターミナルに hc のラベル `herdr-env.pr` / `herdr-env.ci` / `herdr-env.rv` / `herdr-env.pr_at` を付け、mod `spaces-env` が名前の後ろに出す（`#13 競合 CI ✓ CR ✓`、`#959 merged`）。Space の場所は GUI がブランチを出すのと同じく最初のターミナルがいまいるディレクトリで決める。GUI はプラグインのイベントを送らないので、取り直すのは launchd の毎分と `gh-ci-wait` のとき。ラベルは30分で失効する |
 | issue-board（main の Space の右に issue / PR 一覧） | mod `issue-board-env` が、対象リポジトリ（TUI と同じ config.json の `repos`）の main の Space に来たら、今のタブの右に `board.sh` を開く。一覧のターミナルは自分に `herdr-env.board=1` のラベルを付ける。閉じるとその Space では自動で開かなくなり、`cmd+shift+i` で戻す。GUI にはペイン幅を変えるコマンドが無いので、幅は半分になる。着手済みの issue / PR の Space へ移るのは `focus-space.sh`（TUI と GUI の両方） |
 | `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
 
@@ -83,8 +84,8 @@ herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新�
 Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すときは `ctrl+shift+l`（レイアウト切り替え）で `main` を選ぶ。
 
 まだ GUI に移していないもの: `herdr-ask` / `herdr-await` / `gwt-tasks`（委譲。いまはシングル agent 運用なので未使用）、
-`claude-account` のアカウント表示、TUI のローカルプラグイン（pr-status / worktree-setup / pane-title-sync / pane-id-copy / claude-accounts）。
-GUI は PR・ブランチ・ワークツリーの表示とタイトルの同期を自前で持っているので、pr-status と pane-title-sync は要らない見込み。
+`claude-account` のアカウント表示、TUI のローカルプラグイン（worktree-setup / pane-title-sync / pane-id-copy / claude-accounts）。
+GUI はタイトルの同期を自前で持っているので、pane-title-sync は要らない見込み。
 
 ## ファイル対応表
 
@@ -347,6 +348,8 @@ Herdr 0.8.2 では config の `agent_panel_scope` は**効かない**（パー�
 定期実行は `./install.sh --launchd` で入る（`local.herdr-env.herdr-pr-status`、テンプレートは `launchd/herdr-env.herdr-pr-status.plist.in`）。
 
 トークンの TTL は30分なので、定期実行が止まれば古い表示は勝手に消える。
+
+GUI（Herdr.app）にも同じ値を出す（`sync --all` と `sync --path` が GUI の Space も対象にする）。GUI 側の仕組みは「Herdr の GUI（Herdr.app）で使う」の表を参照。
 
 #### worktree-setup: ワークツリーを開いたら .env を置いて依存を入れる
 
