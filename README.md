@@ -68,6 +68,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | `herdr-wait` / `gh-ci-wait` の ⏳ 外部待ち、Stop フックの 💬 要返答 | 印を hc のラベル（`herdr-env.wait` / `.since` / `.pid` / `.human`）に載せ、mod `herdr-env-marks` がサイドバー下にカードで出す。印が無いときカードは消える |
 | agents 一覧を選んでいる Space だけにする（agent-view-space） | mod `agents-env`。標準の agents を `herdr-app do mod.clone` で複製し、`herdr-app/agents-env.py` が絞り込みを足す。見出しのフォルダのボタンか `cmd+shift+a` で「この Space / 全部」を切り替える |
 | `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す |
+| Space ごとの agent の状態 | mod `spaces-env`。標準の Spaces 一覧は畳んだときしか状態を出さず、全体は Agents 欄で見る作り。Agents を絞るとほかの Space が見えなくなるので、各行の右端に状態を出す（動作中 = スピナー、要対応 = !、返事待ち = 💬、完了 = 点、外部待ち = ⏳）。`herdr-app/spaces-env.py` が標準の spaces を複製して書き換える |
 | issue-board（main の Space の右に issue / PR 一覧） | mod `issue-board-env` が、対象リポジトリ（TUI と同じ config.json の `repos`）の main の Space に来たら、今のタブの右に `board.sh` を開く。一覧のターミナルは自分に `herdr-env.board=1` のラベルを付ける。閉じるとその Space では自動で開かなくなり、`cmd+shift+i` で戻す。GUI にはペイン幅を変えるコマンドが無いので、幅は半分になる。着手済みの issue / PR の Space へ移るのは `focus-space.sh`（TUI と GUI の両方） |
 | `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
 
@@ -77,7 +78,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新したら流し直す
 ```
 
-`setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Agents 欄を `agents-env` に、
+`setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Spaces 欄を `spaces-env`、Agents 欄を `agents-env` に、
 サイドバー下に `herdr-env-marks` を浮かべる）、それに切り替える。複製は Herdr の更新に追従しないので、
 Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すときは `ctrl+shift+l`（レイアウト切り替え）で `main` を選ぶ。
 
