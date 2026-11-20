@@ -528,3 +528,7 @@ prefix+shift+a         # agents ペインの「現在の space だけ / 全部�
 - `plugins/github/` 配下 — `herdr plugin install` で再取得する
 - `agent-view-space/scope`, `pane-title-sync/state.json` — プラグインのランタイム状態
 - `~/.local/state/gwt-tasks/` — `gwt-tasks` の台帳（その環境で出した依頼そのもの）
+
+## ライセンス
+
+[MIT](LICENSE)
