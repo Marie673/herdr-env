@@ -7,6 +7,7 @@ TUI の agent-view-space プラグインの GUI 版。Herdr 標準の mod はコ
 
   - 既定は「選んでいる Space だけ」。Agents 見出しの右のボタンか cmd+shift+a で全部 / この Space を切り替える
   - 切り替えは shared("herdr-env.agents.scope") に持つ（"all" で全部）
+  - Claude のアカウントを2つ以上使っているときは、行にアカウントの印（🟦 / 🟪、claude-account のラベル）を出す
 
 使い方: python3 agents-env.py [--home ~/.config/herdr-app]
 """
@@ -78,6 +79,18 @@ patch('            .child(div().text_size(11.5).font_medium().text_color(t.dim).
       '                .child(svg("mods/workspace-chrome/folder.svg").size(14)),\n'
       '            )',
       "header")
+
+# 5. どのアカウントで動いているか（claude-account が付ける herdr-env.acct の先頭の印 🟦 / 🟪）を行に出す。
+#    アカウントを2つ以上使っているときだけ（1つなら言うまでもない）
+patch("    const all = terminals();\n",
+      "    const all = terminals();\n"
+      "    const acctOf = new Map(all.map((x) => [x.address, (x.labels ?? {})[\"herdr-env.acct\"] || \"\"]));\n"
+      "    const manyAccts = new Set(all.filter((x) => x.state === \"live\").map((x) => (x.labels ?? {})[\"herdr-env.acct_id\"]).filter(Boolean)).size > 1;\n",
+      "accounts")
+patch("        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))\n",
+      "        .when(manyAccts && Boolean(acctOf.get(a.address)), el => el.child(div().flex_none().text_size(10).child([...acctOf.get(a.address)][0])))\n"
+      "        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))\n",
+      "row account")
 
 open(path, "w", encoding="utf-8").write(src)
 with open(os.path.join(dest, "mod.json"), "w", encoding="utf-8") as f:

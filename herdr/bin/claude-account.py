@@ -18,10 +18,11 @@ symlink」にする（Codex の shadow home と同じ）。会話の記録も共
   claude-account exec <id> [claude の引数…]  そのアカウントで claude を起動する
   claude-account dir <id>                   CLAUDE_CONFIG_DIR に入れる値（既定は空）
   claude-account current                    この環境のアカウント id
-  claude-account start <id> [--pane P] [--cwd D] [-- claude の引数…]
+  claude-account start <id> [--pane P | --terminal T] [--cwd D] [-- claude の引数…]
                                             herdr: 新しいタブでそのアカウントの claude を起動
-  claude-account switch <id> [--pane P] [--force]
+  claude-account switch <id> [--pane P | --terminal T] [--force]
                                             herdr: ペインの会話を、同じ会話のまま別アカウントで開き直す
+                                            （--terminal は Herdr の GUI のターミナル。GUI の中では既定で自分）
   claude-account of-session <session_id>    そのセッションを最後に動かしたアカウント id
   claude-account hook <session-start|session-end|statusline>   Claude Code の hooks / statusLine から呼ぶ
 """
@@ -257,8 +258,87 @@ def start_agent(name, pane, args):
 
 
 def notify(title, body=""):
+    if gui_mode():
+        gui_notify(title, body)
+        return
     subprocess.run(["herdr", "notification", "show", title, "--body", body, "--sound", "none"],
                    capture_output=True)
+
+
+# ---- Herdr の GUI（Herdr.app。ペインは herdr-core の hc ターミナル） -----------------------
+# GUI のペインには HERDR_PANE_ID が無く、HC_TERMINAL_ID が入る。herdr の agent / pane コマンドは
+# GUI とつながっていないので、hc と herdr-app を使う。
+
+
+def gui_mode():
+    return bool(os.environ.get("HC_TERMINAL_ID") or os.environ.get("CLAUDE_ACCOUNT_ORIGIN_TERMINAL")) \
+        and not os.environ.get("HERDR_PANE_ID") and shutil.which("hc") is not None
+
+
+def hc(args, check=True):
+    # HC_TERMINAL_ID を外す。付いていると hc は送り主の agent からのメッセージとして <hc> の札を付けて
+    # 送るので、/exit がコマンドとして効かない（人がキーで打ったのと同じにする）
+    env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
+    out = subprocess.run(["hc"] + args, capture_output=True, text=True, env=env)
+    if check and out.returncode != 0:
+        die("hc %s: %s" % (" ".join(args[:2]), (out.stderr or out.stdout).strip()))
+    try:
+        return json.loads(out.stdout) if out.stdout.strip() else {}
+    except ValueError:
+        return {}
+
+
+def herdr_app(args, check=True):
+    out = subprocess.run(["herdr-app"] + args, capture_output=True, text=True)
+    try:
+        res = json.loads(out.stdout) if out.stdout.strip() else {}
+    except ValueError:
+        res = {}
+    if check and (out.returncode != 0 or "error" in res):
+        die("herdr-app %s: %s" % (" ".join(args[:2]), res.get("error") or (out.stderr or out.stdout).strip()))
+    return res
+
+
+def gui_notify(title, body=""):
+    """GUI には外から通知を出すコマンドが無いので、macOS の通知に出す"""
+    script = "display notification %s with title %s" % (json.dumps(body[:200]), json.dumps(title))
+    subprocess.run(["osascript", "-e", script], capture_output=True)
+
+
+def gui_terminal_session(term):
+    """GUI のターミナルで動いている claude の session ID。hooks が付けるラベルか、起動引数の --resume から"""
+    info = hc(["get", term, "--json"], check=False)
+    sid = (info.get("labels") or {}).get("herdr-env.session")
+    argv = (info.get("foreground") or {}).get("argv") or []
+    if not sid and "--resume" in argv[:-1]:
+        sid = argv[argv.index("--resume") + 1]
+    return info, sid
+
+
+def gui_is_claude(info):
+    fg = (info.get("foreground") or {}).get("argv") or [""]
+    return info.get("agent") == "claude-code" or (info.get("status") or {}).get("app") == "claude-code" \
+        or os.path.basename(fg[0]) == "claude"
+
+
+def gui_space_of(term):
+    for sp in herdr_app(["ls"]).get("spaces", []):
+        for tab in sp.get("tabs", []):
+            for x in tab.get("terminals", []):
+                if x.get("terminal") == term:
+                    return sp
+    return None
+
+
+def gui_label(term, **kv):
+    if term:
+        subprocess.run(["hc", "label", term] + ["herdr-env.%s=%s" % (k, v) for k, v in kv.items()],
+                       capture_output=True)
+
+
+def claude_line(a, args):
+    """ログインシェルで打つ claude の起動行（claude のラッパー関数を通すため -A で渡す）"""
+    return " ".join(["claude", "-A", a.id] + [shell_quote(x) for x in args])
 
 
 def pad(text, cols):
@@ -371,6 +451,13 @@ def parse_opts(argv, names):
     return opts, rest
 
 
+def origin_terminal(opts):
+    t = opts.get("terminal") or os.environ.get("CLAUDE_ACCOUNT_ORIGIN_TERMINAL") or os.environ.get("HC_TERMINAL_ID")
+    if not t:
+        die("対象のターミナルが分かりません（--terminal で指定してください）")
+    return t
+
+
 def origin_pane(opts):
     pane = opts.get("pane") or os.environ.get("CLAUDE_ACCOUNT_ORIGIN_PANE") or os.environ.get("HERDR_PANE_ID")
     if not pane:
@@ -380,11 +467,13 @@ def origin_pane(opts):
 
 def cmd_start(argv):
     """新しいタブで、指定のアカウントの claude を起動する。"""
-    opts, rest = parse_opts(argv, {"pane": True, "cwd": True, "name": True, "no-focus": False})
+    opts, rest = parse_opts(argv, {"pane": True, "terminal": True, "cwd": True, "name": True, "no-focus": False})
     if not rest:
-        die("使い方: claude-account start <id> [--pane P] [--cwd D] [-- claude の引数…]")
+        die("使い方: claude-account start <id> [--pane P | --terminal T] [--cwd D] [-- claude の引数…]")
     a = find(rest[0])
     init_account(a, quiet=True)
+    if opts.get("terminal") or (not opts.get("pane") and gui_mode()):
+        return gui_start(a, opts, rest[1:])
     pane = origin_pane(opts)
     info = herdr(["pane", "get", pane]).get("result", {}).get("pane", {})
     cwd = opts.get("cwd") or info.get("foreground_cwd") or info.get("cwd") or HOME
@@ -401,12 +490,79 @@ def cmd_start(argv):
                                                      "" if ready else "。入力待ちです。画面を確認してください"))
 
 
+def gui_start(a, opts, args):
+    term = origin_terminal(opts)
+    info = hc(["get", term, "--json"], check=False)
+    sp = gui_space_of(term)
+    cwd = opts.get("cwd") or (info.get("foreground") or {}).get("cwd") or info.get("cwd") or HOME
+    req = {"name": a.label, "folder": cwd, "focus": not opts.get("no-focus"),
+           "argv": ["/bin/zsh", "-lic", "%s; exec /bin/zsh -l" % claude_line(a, args)]}
+    if sp:
+        req["space"] = sp["id"]
+    res = herdr_app(["do", "tab.new", json.dumps(req, ensure_ascii=False)])
+    print("%s で起動しました（ターミナル %s）" % (a.display, res.get("terminal", "?")))
+
+
+def gui_switch(a, opts):
+    """GUI のターミナルの claude を終え、同じ会話を別アカウントで開き直す"""
+    term = origin_terminal(opts)
+    info, sid = gui_terminal_session(term)
+    if not gui_is_claude(info):
+        die("ターミナル %s で claude が動いていません" % term)
+    if not sid:
+        die("ターミナル %s のセッション ID が分かりません" % term)
+    if session_account(sid) == a.id:
+        print("もう %s で動いています" % a.display)
+        return
+    if info.get("status") == "working" and not opts.get("force"):
+        die("作業中です。止まってから切り替えてください（--force で強制）")
+    init_account(a, quiet=True)
+    if term == os.environ.get("HC_TERMINAL_ID") and not opts.get("detached"):
+        log = open(os.path.join(STATE, "switch.log"), "a") if os.path.isdir(STATE) else subprocess.DEVNULL
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "switch", a.id, "--terminal", term, "--detached"]
+                         + (["--force"] if opts.get("force") else []),
+                         stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        print("%s に切り替えます。このセッションはいったん終了し、同じ会話のまま開き直します" % a.display)
+        return
+    cwd = (info.get("foreground") or {}).get("cwd") or info.get("cwd") or HOME
+    hc(["keys", term, "esc"], check=False)
+    hc(["send", term, "/exit"], check=False)
+    alive = True
+    for _ in range(60):
+        time.sleep(0.5)
+        cur = hc(["get", term, "--json"], check=False)
+        if cur.get("state") != "live":
+            alive = False
+            break
+        if not gui_is_claude(cur):
+            break
+    else:
+        die("claude が終了しませんでした（ターミナル %s）" % term)
+    line = "%s --resume %s" % (claude_line(a, []), sid)
+    if alive:
+        # ターミナルにシェルが残った: そこで続ける（先頭の空白で履歴に残さない）
+        time.sleep(0.3)
+        hc(["send", term, " cd %s && %s" % (shell_quote(cwd), line)])
+    else:
+        sp = gui_space_of(term)
+        req = {"folder": cwd, "argv": ["/bin/zsh", "-lic", "%s; exec /bin/zsh -l" % line]}
+        if sp:
+            req["space"] = sp["id"]
+        herdr_app(["do", "tab.new", json.dumps(req, ensure_ascii=False)])
+    remember_session(sid, a)
+    msg = "%s に切り替えました（同じ会話を再開）" % a.display
+    print(msg)
+    notify(msg, sid)
+
+
 def cmd_switch(argv):
     """ペインの claude を終了し、同じ会話を別アカウントで --resume する。"""
-    opts, rest = parse_opts(argv, {"pane": True, "force": False, "detached": False})
+    opts, rest = parse_opts(argv, {"pane": True, "terminal": True, "force": False, "detached": False})
     if not rest:
-        die("使い方: claude-account switch <id> [--pane P]")
+        die("使い方: claude-account switch <id> [--pane P | --terminal T]")
     a = find(rest[0])
+    if opts.get("terminal") or (not opts.get("pane") and gui_mode()):
+        return gui_switch(a, opts)
     pane = origin_pane(opts)
     ag = agent_in_pane(pane)
     if not ag or ag.get("agent") != "claude":
@@ -478,6 +634,38 @@ def report_badge(pane, a, data):
                    capture_output=True)
 
 
+def limits_text(data):
+    limits = (data or {}).get("rate_limits") or {}
+    out = []
+    for key, short in (("five_hour", "5h"), ("seven_day", "7d")):
+        used = (limits.get(key) or {}).get("used_percentage")
+        if isinstance(used, (int, float)):
+            out.append("%s %d%%" % (short, max(0, min(100, round(100 - used)))))
+    return "  ".join(out)
+
+
+def gui_hook(term, event, a, data):
+    """GUI: このターミナルの会話 ID・アカウント・上限の残りを hc のラベルに載せる。
+    herdr-env の mod（herdr-env-marks の残量の欄、agents-env の行）と herdr-shelf / ピッカーが読む"""
+    if event == "session-end":
+        subprocess.run(["hc", "label", term, "herdr-env.session=", "herdr-env.acct=", "herdr-env.acct_id="],
+                       capture_output=True)
+        return
+    kv = {}
+    sid = data.get("session_id")
+    if sid:
+        kv["session"] = sid
+    if a:
+        kv["acct_id"] = a.id
+        kv["acct"] = a.display
+    lim = limits_text(data) if event == "statusline" else ""
+    if lim:
+        kv["lim"] = lim
+        kv["lim_at"] = str(int(time.time()))
+    if kv:
+        gui_label(term, **kv)
+
+
 def cmd_hook(argv):
     """SessionStart / SessionEnd / statusline。どのアカウントで動いているかをサイドバーとセッション台帳に残す。
 
@@ -490,6 +678,9 @@ def cmd_hook(argv):
     event = argv[0] if argv else ""
     pane = os.environ.get("HERDR_PANE_ID")
     a = from_config_dir(os.environ.get("CLAUDE_CONFIG_DIR"))
+    term = os.environ.get("HC_TERMINAL_ID") if not pane else None
+    if term:
+        gui_hook(term, event, a, data)
     if event in ("session-start", "statusline"):
         if a:
             remember_session(data.get("session_id"), a)

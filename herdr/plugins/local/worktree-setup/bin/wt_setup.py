@@ -16,6 +16,9 @@
    "repos": {"my-app": {"install": false, "setup": [["npm", "run", "prepare"]]}}}
 
 実行中はその space に $setup = "⚙ setup"、失敗したら "✗ setup" を出し、herdr の通知も出す。
+Herdr の GUI（Herdr.app）では、herdr-gui がワークツリーのスペースを開いたあとに `run --path` で呼ぶ
+（GUI はプラグインのイベントを送らない）。印はそのスペースのターミナルに hc のラベル herdr-env.setup で付け
+（spaces-env が行に出す）、失敗は macOS の通知で知らせる。
 """
 import argparse
 import fnmatch
@@ -85,6 +88,34 @@ def set_token(ws_id, value, ttl_ms):
               "--ttl-ms", str(ttl_ms))
     else:
         herdr("workspace", "report-metadata", ws_id, "--source", SOURCE, "--clear-token", "setup")
+
+
+HERDR_APP = shutil.which("herdr-app") or "/Applications/Herdr.app/Contents/MacOS/Herdr"
+HC = shutil.which("hc") or os.path.join(HOME, ".local/bin/hc")
+
+
+def gui_terminals(wt):
+    """GUI でこのワークツリーをフォルダにしているスペースのターミナル（窓が無ければ []）"""
+    if not (os.path.exists(HERDR_APP) and os.path.exists(HC)):
+        return []
+    p = subprocess.run([HERDR_APP, "ls"], capture_output=True, text=True)
+    try:
+        spaces = json.loads(p.stdout).get("spaces", [])
+    except ValueError:
+        return []
+    real = os.path.realpath(wt)
+    return [x["terminal"] for sp in spaces if sp.get("folder") and os.path.realpath(sp["folder"]) == real
+            for tab in sp.get("tabs", []) for x in tab.get("terminals", []) if x.get("terminal")]
+
+
+def gui_mark(wt, value):
+    for term in gui_terminals(wt):
+        subprocess.run([HC, "label", term, "herdr-env.setup=%s" % (value or "")], capture_output=True)
+
+
+def gui_notify(title, body):
+    script = "display notification %s with title %s" % (json.dumps(body[:200]), json.dumps(title))
+    subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
 def load_config(repo_name):
@@ -215,6 +246,9 @@ def setup(wt, ws_id, force):
     conf = load_config(repo_name)
     log("セットアップ開始: %s (%s) main=%s" % (wt, branch, main))
     set_token(ws_id, "⚙ setup", 30 * 60 * 1000)
+    gui = bool(gui_terminals(wt))
+    if gui:
+        gui_mark(wt, "⚙ setup")
 
     ok = True
     try:
@@ -233,6 +267,10 @@ def setup(wt, ws_id, force):
     with os.fdopen(fd, "w") as f:
         json.dump(status, f, ensure_ascii=False)
     log("セットアップ%s" % ("完了" if ok else "失敗"))
+    if gui:
+        gui_mark(wt, None if ok else "✗ setup")
+        if not ok:
+            gui_notify("ワークツリーのセットアップ失敗: %s" % branch, log.path)
     if ok:
         set_token(ws_id, None, 0)
     else:

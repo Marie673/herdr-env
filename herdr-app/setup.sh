@@ -6,7 +6,9 @@
 #   - mods/spaces-env      : 各行の右端にその Space の agent の状態を出す Spaces 一覧（spaces-env.py が標準の spaces から作る）
 #   - layouts/herdr-env    : 標準の main を複製し、Spaces / Agents 欄を差し替え、サイドバー下にカードを浮かべたもの
 #   - mods/issue-board-env : issue-board（TUI のプラグイン）の GUI 版の入口。対象リポジトリの main の Space で一覧を右に開く
-#   - keys.json            : cmd+shift+a で agents の範囲（この Space / 全部）、cmd+shift+i で issue 一覧の表示を切り替える
+#   - keys.json            : cmd+shift+a で agents の範囲（この Space / 全部）、cmd+shift+i で issue 一覧の表示を切り替える。
+#                            cmd+shift+u で Claude のアカウントを選ぶ（起動 / この会話を別アカウントで続ける）、
+#                            cmd+shift+z でこの agent を棚にしまう、cmd+shift+s で棚から開き直す
 #                            （そのキーが空いているときだけ足す）
 #
 # 標準の main / agents は Herdr の更新で変わるが、複製は追従しない。Herdr を更新したらもう一度流す。
@@ -71,6 +73,9 @@ add_key() {
 }
 add_key cmd-shift-a agents-env.scope
 add_key cmd-shift-i issue-board-env.toggle
+add_key cmd-shift-u herdr-env-marks.accounts
+add_key cmd-shift-z herdr-env-marks.shelve
+add_key cmd-shift-s herdr-env-marks.restore
 
 [ "$SWITCH" = 1 ] && herdr-app do layout.switch '{"name":"herdr-env"}' >/dev/null
 herdr-app status | jq -c '{layout, errors}'

@@ -13,6 +13,8 @@ worktree の Space には、そのブランチの PR の状態も名前の後ろ
   #123 / #123 draft / #123 競合 / #123 merged / #123 closed、CI ✓ / CI … / CI ✗2、CR ✓ 要修正 など
   … pr-status（herdr/plugins/local/pr-status）が毎分書く hc のラベル herdr-env.pr / ci / rv から。30分で失効
 
+ワークツリーの初回セットアップ中は ⚙ setup、失敗したら ✗ setup も出す（worktree-setup の herdr-env.setup）
+
 Herdr 標準の mod はコードを配らず、`herdr-app do mod.clone` で複製して必要な所だけ書き換える
 （Herdr を更新したら、このスクリプトをもう一度流す）。
 
@@ -94,7 +96,8 @@ patch('    if (l["herdr-env.wait"] && s && now - s < TTL) m.wait = true;\n',
       '    if (l["herdr-env.wait"] && s && now - s < TTL) m.wait = true;\n'
       '    const at = Number(l["herdr-env.pr_at"] || 0);\n'
       '    if (!m.pr && at && now - at < 30 * 60 && (l["herdr-env.pr"] || l["herdr-env.ci"] || l["herdr-env.rv"]))\n'
-      '      m.pr = { pr: l["herdr-env.pr"] || "", ci: l["herdr-env.ci"] || "", rv: l["herdr-env.rv"] || "" };\n',
+      '      m.pr = { pr: l["herdr-env.pr"] || "", ci: l["herdr-env.ci"] || "", rv: l["herdr-env.rv"] || "" };\n'
+      '    if (!m.setup && l["herdr-env.setup"]) m.setup = l["herdr-env.setup"];\n',
       "pr labels")
 patch('// herdr-env: 行末の状態。',
       """// herdr-env: PR の状態（pr-status のラベル）。悪いものは赤、待ちは黄、通ったものは緑、merged は紫、closed は薄く
@@ -108,6 +111,8 @@ function prTail(t, p) {
 // herdr-env: 行末の状態。""",
       "prTail")
 patch('          .when(Boolean(stateMark(t, w.status, this.marks?.get(w.id))), ',
+      '          .when(Boolean(this.marks?.get(w.id)?.setup), (el) => el.child(div().flex_none().text_size(11.5)'
+      '.text_color(this.marks.get(w.id).setup.startsWith("✗") ? t.ansi1 : t.ansi3).child(this.marks.get(w.id).setup)))\n'
       '          .when(Boolean(this.marks?.get(w.id)?.pr), (el) => el.child(prTail(t, this.marks.get(w.id).pr)))\n'
       '          .when(Boolean(stateMark(t, w.status, this.marks?.get(w.id))), ',
       "row pr")

@@ -6,10 +6,19 @@
 // GUI の agents 一覧は idle / done としか言えないので、「もう用は無い」と「外部の返事待ち」
 // 「人間の返事待ち」を見分けられるよう、印のある agent だけをここに並べる。
 // 印が無いときは何も描かない（浮かせて置くと、空のときは消える）。
+//
+// その下に、Claude のアカウントごとの上限の残り（5h / 7d）を出す。claude-account が statusLine から
+// 各ターミナルに付けるラベルを読む: herdr-env.acct_id / herdr-env.acct（表示名）/ herdr-env.lim / herdr-env.lim_at。
+// 上限はアカウント単位なので、同じアカウントのターミナルのうち一番新しい値を使う。6時間たった値は出さない。
+//
+// キーの受け口（keys.json から `herdr-env-marks.<command>`）:
+//   accounts … アカウントを選んで起動 / フォーカス中の会話を別アカウントで続ける（claude-accounts のピッカー）
+//   shelve   … フォーカス中の agent のセッションを棚にしまう（herdr-shelf）
+//   restore  … 棚から開き直す（herdr-shelf restore）
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { terminals, agents, theme, run, exec, checking } from "herdr";
+import { terminals, agents, theme, run, exec, checking, nextCommand, focused, notify } from "herdr";
 
 const TTL = 6 * 3600; // herdr-wait と同じ。消し忘れても居座らない
 
@@ -27,6 +36,47 @@ export default class HerdrEnvMarks extends View {
     if (checking()) return;
     // 経過時間の表示と、--pid の印の生死を1分ごとに見直す
     cx.timer.every(60000, (cx) => this.checkPids(cx));
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        try { await this.command(c); } catch (e) { notify({ title: "herdr-env", body: String(e), level: "error" }); }
+        cx.notify();
+      }
+    });
+  }
+
+  // フォーカス中のペインの下に、終わると閉じるターミナルを開く（ピッカー用）
+  below(env, script) {
+    const f = focused();
+    const argv = ["/usr/bin/env", ...env, "/bin/bash", "-lc", script];
+    run("pane.split", f?.pane ? { direction: "down", pane: f.pane, argv } : { direction: "down", argv });
+  }
+
+  async command(c) {
+    const term = focused()?.terminal ?? "";
+    if (c === "accounts") {
+      this.below([`CLAUDE_ACCOUNT_ORIGIN_TERMINAL=${term}`], 'exec "$HOME/.config/herdr/plugins/local/claude-accounts/bin/pick.sh"');
+    } else if (c === "restore") {
+      this.below([], 'herdr-shelf restore || read -r -p "Enter で閉じます" _');
+    } else if (c === "shelve") {
+      if (!term) return;
+      const r = await exec("/bin/bash", ["-lc", `herdr-shelf shelve --terminal ${term}`], { timeout: 30000 });
+      const out = (r.stdout || r.stderr || "").trim();
+      notify({ title: r.code === 0 ? "棚にしまいました" : "棚にしまえませんでした", body: out, level: r.code === 0 ? "info" : "error" });
+    }
+  }
+
+  // アカウントごとの上限の残り
+  usage() {
+    const now = Date.now() / 1000;
+    const best = new Map();
+    for (const t of terminals()) {
+      const l = t.labels ?? {};
+      const id = l["herdr-env.acct_id"], at = Number(l["herdr-env.lim_at"] || 0);
+      if (!id || !l["herdr-env.lim"] || !at || now - at > TTL) continue;
+      if ((best.get(id)?.at ?? 0) < at) best.set(id, { id, name: l["herdr-env.acct"] || id, lim: l["herdr-env.lim"], at });
+    }
+    return [...best.values()].sort((x, y) => x.name.localeCompare(y.name));
   }
 
   marks() {
@@ -76,14 +126,30 @@ export default class HerdrEnvMarks extends View {
 
   render(_cx) {
     const list = this.marks();
-    if (!list.length) return div();
+    const usage = this.usage();
+    if (!list.length && !usage.length) return div();
     const t = theme();
     const now = Date.now() / 1000;
+    // 残りの少ない方で色を決める（20% 以下は赤、50% 以下は黄）
+    const tone = (lim) => {
+      const low = Math.min(...[...lim.matchAll(/(\d+)%/g)].map((m) => Number(m[1])));
+      return low <= 20 ? t.blocked : low <= 50 ? t.working : t.dim;
+    };
+    const usageRows = usage.map((u) => h_flex()
+      .id(`usage-${u.id}`)
+      .px(10)
+      .h(22)
+      .gap(8)
+      .items_center()
+      .text_size(11.5)
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(u.name))
+      .child(div().flex_none().text_color(tone(u.lim)).child(u.lim)));
     return v_flex()
       .w(244)
       .py(4)
       .gap(1)
       .text_size(12)
+      .children(usageRows)
       .children(list.map((m) => h_flex()
         .id(`mark-${m.address}`)
         .px(10)

@@ -20,6 +20,7 @@
 set -u
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-env/gui-move"
+WT_SETUP="${HERDR_WT_SETUP:-$HOME/.config/herdr/plugins/local/worktree-setup/bin/wt_setup.py}"
 
 die() { echo "herdr-gui: $*" >&2; exit 1; }
 
@@ -68,6 +69,14 @@ trust_later() {
       hc keys "$t" down >/dev/null; sleep 0.3
       screen="$(hc read "$t" --lines 40 2>/dev/null)"
     done' _ "$t" >/dev/null 2>&1 &
+}
+
+# ワークツリーの初回セットアップ（.env などのコピーと依存のインストール）。TUI では worktree-setup
+# プラグインが worktree.opened で走らせるが、GUI はイベントを送らないので、スペースを開いたあとここで呼ぶ。
+# 2回目以降は wt_setup.py が印（<git-dir>/herdr-setup.json）を見て何もしない
+setup_later() {
+  [ -f "$WT_SETUP" ] || return 0
+  nohup /usr/bin/python3 "$WT_SETUP" run --path "$1" >/dev/null 2>&1 &
 }
 
 cmd_open() {
@@ -123,6 +132,7 @@ cmd_open() {
     echo "gwt: ${branch} -> ${worktree}（スペース $(jq -r '.space // empty' <<<"$out") を開きました）"
   fi
   [ "$start_agent" = 1 ] && trust_later "$(jq -r '.terminal // empty' <<<"$out")"
+  setup_later "$worktree"
   return 0
 }
 
@@ -172,6 +182,7 @@ cmd_move_on_stop() {
     out="$(herdr-app do space.new "$args")" || return 1
   fi
   trust_later "$(jq -r '.terminal // empty' <<<"$out")"
+  setup_later "$wt"
   # 元のペインを閉じる。フックが返ってから閉じるよう、切り離して少し待つ
   nohup /bin/sh -c "sleep 1; hc kill $(printf '%q' "$HC_TERMINAL_ID")" >/dev/null 2>&1 &
 }
