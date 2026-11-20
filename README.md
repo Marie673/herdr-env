@@ -56,6 +56,35 @@ cd "$(ghq list -p Marie673/herdr-env)"
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
   - **pane-id-copy**: 今いるペインの `pane_id` をクリップボードへ入れる（`prefix+shift+c`）。他のペインのエージェントに「このペインを見て」と伝えるときの識別子
 
+## Herdr の GUI（Herdr.app）で使う
+
+Herdr には TUI（`herdr server`）とは別に、GUI の Herdr.app がある。GUI のペインは herdr-core（`hc`）のターミナルで、
+TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` コマンドとは**つながっていない**。
+ペインに `HERDR_ENV` / `HERDR_PANE_ID` も入らない（代わりに `HC_TERMINAL_ID` が入る）。そのため GUI 用に次を足している。
+
+| 機能 | GUI での扱い |
+|---|---|
+| 今やっている操作の表示（`$act`） | 不要。herdr-core が Claude Code の状態と操作を自分で拾う |
+| `herdr-wait` / `gh-ci-wait` の ⏳ 外部待ち、Stop フックの 💬 要返答 | 印を hc のラベル（`herdr-env.wait` / `.since` / `.pid` / `.human`）に載せ、mod `herdr-env-marks` がサイドバー下にカードで出す。印が無いときカードは消える |
+| agents 一覧を選んでいる Space だけにする（agent-view-space） | mod `agents-env`。標準の agents を `herdr-app do mod.clone` で複製し、`herdr-app/agents-env.py` が絞り込みを足す。見出しのフォルダのボタンか `cmd+shift+a` で「この Space / 全部」を切り替える |
+| `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す |
+| issue-board（main の Space の右に issue / PR 一覧） | mod `issue-board-env` が、対象リポジトリ（TUI と同じ config.json の `repos`）の main の Space に来たら、今のタブの右に `board.sh` を開く。一覧のターミナルは自分に `herdr-env.board=1` のラベルを付ける。閉じるとその Space では自動で開かなくなり、`cmd+shift+i` で戻す。GUI にはペイン幅を変えるコマンドが無いので、幅は半分になる。着手済みの issue / PR の Space へ移るのは `focus-space.sh`（TUI と GUI の両方） |
+| `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
+
+入れ方:
+
+```sh
+herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新したら流し直す
+```
+
+`setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Agents 欄を `agents-env` に、
+サイドバー下に `herdr-env-marks` を浮かべる）、それに切り替える。複製は Herdr の更新に追従しないので、
+Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すときは `ctrl+shift+l`（レイアウト切り替え）で `main` を選ぶ。
+
+まだ GUI に移していないもの: `herdr-ask` / `herdr-await` / `gwt-tasks`（委譲。いまはシングル agent 運用なので未使用）、
+`claude-account` のアカウント表示、TUI のローカルプラグイン（pr-status / worktree-setup / pane-title-sync / pane-id-copy / claude-accounts）。
+GUI は PR・ブランチ・ワークツリーの表示とタイトルの同期を自前で持っているので、pr-status と pane-title-sync は要らない見込み。
+
 ## ファイル対応表
 
 | リポジトリ内 | 配置先 |
@@ -63,6 +92,8 @@ cd "$(ghq list -p Marie673/herdr-env)"
 | `herdr/config.toml` | `~/.config/herdr/config.toml`（テーマ名は空。好みのものを入れる） |
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
+| `herdr/bin/herdr-gui.sh` | `~/.config/herdr/bin/herdr-gui.sh` + `~/.local/bin/herdr-gui` へ symlink（GUI 用） |
+| `herdr-app/` | `herdr-app/setup.sh` が `~/.config/herdr-app/` に mod とレイアウトを作る（GUI 用、下の「Herdr の GUI で使う」） |
 | `herdr/bin/gh-ci-wait.sh` | `~/.config/herdr/bin/gh-ci-wait.sh` + `~/.local/bin/gh-ci-wait` へ symlink |
 | `herdr/bin/gwt-tasks.py` | `~/.config/herdr/bin/gwt-tasks.py` + `~/.local/bin/gwt-tasks` へ symlink |
 | `herdr/bin/herdr-ask.sh` | `~/.config/herdr/bin/herdr-ask.sh` + `~/.local/bin/herdr-ask` へ symlink |

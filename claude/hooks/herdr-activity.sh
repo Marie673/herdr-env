@@ -1,5 +1,6 @@
 #!/bin/sh
 # 自作フック（herdr 管理外）。今やっている操作を herdr サイドバーの $act トークンとして報告する。
+# Herdr の GUI（Herdr.app）では、人間の返事待ちの旗と gwt の移動予約だけを扱う（下の GUI 分岐）。
 # 公式の herdr-agent-state.sh は herdr の再インストールで上書きされるため、こちらに分離している。
 #
 # 使い方: herdr-activity.sh <tool|prompt|stop|notify|clear>
@@ -8,9 +9,17 @@
 action="${1:-}"
 input="$(cat 2>/dev/null)"
 
-[ "${HERDR_ENV:-}" = "1" ] || exit 0
-[ -n "${HERDR_PANE_ID:-}" ] || exit 0
-command -v herdr >/dev/null 2>&1 || exit 0
+# TUI（herdr server のペイン）か、GUI（Herdr.app。ペインは herdr-core のターミナル）か。
+# GUI はエージェントの状態も「今やっている操作」も herdr-core が自分で拾うので、ここでは
+# 人間の返事待ちの旗と、gwt の「ターンが終わったらワークツリーへ移す」予約だけを扱う。
+GUI=0
+if [ "${HERDR_ENV:-}" = "1" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+  command -v herdr >/dev/null 2>&1 || exit 0
+elif [ -n "${HC_TERMINAL_ID:-}" ] && command -v hc >/dev/null 2>&1; then
+  GUI=1
+else
+  exit 0
+fi
 command -v jq >/dev/null 2>&1 || exit 0
 
 # サブエージェントの発火は無視する。メインの表示を奪って行が乱高下するのを防ぐ。
@@ -44,6 +53,20 @@ ends_with_question() {
          + "let me know|should I |shall I |would you like|do you want|which (one|option)"; "i"))
   ' >/dev/null 2>&1
 }
+
+if [ "$GUI" = 1 ]; then
+  case "$action" in
+    prompt) "$HW" human off >/dev/null 2>&1 ;;
+    stop)
+      if ends_with_question; then "$HW" human on >/dev/null 2>&1; else "$HW" human off >/dev/null 2>&1; fi
+      # gwt が予約した「このペインの会話をワークツリーのスペースへ移す」を、ターンの終わりに実行する
+      HG="$HOME/.config/herdr/bin/herdr-gui.sh"
+      [ -x "$HG" ] && printf '%s' "$input" | "$HG" move-on-stop >/dev/null 2>&1
+      ;;
+    clear) "$HW" human off >/dev/null 2>&1 ;;
+  esac
+  exit 0
+fi
 
 wait_label="$("$HW" label 2>/dev/null)"
 

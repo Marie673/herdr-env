@@ -6,6 +6,8 @@
 #   ./install.sh --force      中身が違うファイルも置き換える（元は <file>.bak.<日時> に残す）
 #   ./install.sh --launchd    定期実行（wt-audit --auto / herdr-pr-status sync）も入れる（macOS）
 #
+# Herdr の GUI（Herdr.app）が入っていれば、herdr-app/setup.sh で GUI 側の表示も入れる。
+#
 # 自動でやらないこと（最後に手順を出す）:
 #   ~/.zshrc への source、~/.claude/settings.json へのマージ、~/.claude/CLAUDE.md への追記、
 #   herdr integration install claude、GitHub のプラグイン、claude-account のアカウント設定
@@ -113,7 +115,7 @@ done
 for pair in \
   herdr-wait:herdr-wait.sh gh-ci-wait:gh-ci-wait.sh gwt-tasks:gwt-tasks.py \
   herdr-ask:herdr-ask.sh herdr-await:herdr-await.sh wt-audit:wt-audit.sh \
-  claude-account:claude-account.py; do
+  claude-account:claude-account.py herdr-gui:herdr-gui.sh; do
   link "$HERDR_CONF/bin/${pair#*:}" "$BIN/${pair%%:*}"
 done
 
@@ -136,6 +138,14 @@ if command -v herdr >/dev/null 2>&1; then
   done
 else
   warn "herdr が見つからないので herdr plugin link を飛ばしました"
+fi
+
+say "== Herdr GUI（Herdr.app）"
+if command -v herdr-app >/dev/null 2>&1 && [ -d "${HERDR_APP_HOME:-$HOME/.config/herdr-app}" ]; then
+  if [ "$DRY" = 1 ]; then say "  (dry-run) herdr-app/setup.sh"
+  else "$SRC/herdr-app/setup.sh" | sed 's/^/  /'; fi
+else
+  say "  - herdr-app が無いので飛ばしました（入れたあと herdr-app/setup.sh を流す）"
 fi
 
 say "== git: 本体リポジトリを main に固定するフック"

@@ -6,7 +6,7 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 
 ## 外部待ちは herdr に印を立てる
 
-`HERDR_ENV=1` のとき、herdr のサイドバーはエージェントの状態を idle / done としか表示できない。「用が終わって手空き」と「外部の返事を待っているだけ」が同じ見た目になるので、待ちに入ったら明示的に印を立てる（`herdr/bin/herdr-wait.sh` を `~/.local/bin/herdr-wait` から呼べるようにしておく）。
+`HERDR_ENV=1`（Herdr の TUI）または `HC_TERMINAL_ID` がある（Herdr の GUI、Herdr.app）とき、herdr のサイドバーはエージェントの状態を idle / done としか表示できない。「用が終わって手空き」と「外部の返事を待っているだけ」が同じ見た目になるので、待ちに入ったら明示的に印を立てる（`herdr/bin/herdr-wait.sh` を `~/.local/bin/herdr-wait` から呼べるようにしておく）。
 
 - CodeRabbit のレビュー、デプロイなど、**こちらでは進められない外部の返事を待つ状態に入ったら** `herdr-wait set "<何を待っているか>"` を実行する（例: `herdr-wait set "CodeRabbit レビュー待ち #123"`）。応答を終える直前に実行する。
 - 待ちが解けたら（レビューが届いた / CI が緑になった / 待つのをやめた）**必ず** `herdr-wait clear` を実行する。
@@ -14,7 +14,8 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 - 印が立っている間、サイドバーの状態表示は「⏳ 外部待ち」、活動行は「⏳ <ラベル> <経過時間>」になる。
 - 印は6時間で自動失効するので、消し忘れが居座ることはない。
 - **人間に聞くときは印を立てない。** 人間の返事待ちは外部待ちではない。返答の最後を問いかけ（「〜してよいですか。」「教えてください。」）で終えれば、Stop フックがそれを見て状態を「💬 要返答」に切り替える。外部待ちの印が残っていても、こちらが優先され、working には見えない。
-- `HERDR_ENV=1` でない環境では何もしなくてよい。
+- GUI では印がサイドバー下のカード（⏳ / 💬）に出る。使い方は TUI と同じ。
+- `HERDR_ENV=1` も `HC_TERMINAL_ID` も無い環境では何もしなくてよい。
 
 ## GitHub Actions / PR の CI を待つときは `gh-ci-wait`
 
@@ -47,6 +48,7 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 - To start branch work, run `gwt <branch>` from inside the canonical checkout. It creates the gwq worktree and opens it as a Herdr workspace.
 - 作業はシングル agent で続ける。別の agent（Codex・Sonnet・新しい Claude）を立てて実装を任せない。
 - Under Herdr (`HERDR_ENV=1`), `gwt` を agent ペインから実行すると、新しい agent は起動せず**自分のペインがそのまま新しい workspace へ移る**（「Move to...」と同じ。会話はそのまま）。移ったあと Bash の cwd はワークツリーに移るので、以降はワークツリーで作業を続ける。元の main の workspace はペインが無くなれば閉じる。
+- Herdr の GUI（`HC_TERMINAL_ID` があり `HERDR_ENV` が無い）では、`gwt` を agent ペインから実行すると**このターンが終わったときに**、ワークツリーのスペースで同じ会話を `--resume` し直し、元のペインは閉じる。GUI はブランチをプロセスのディレクトリで判断するため、ペインを動かすだけにはしていない。`gwt` を実行したらそのターンは報告して終える（続きは移った先で行う）。取り消すときは `herdr-gui cancel`。
 - 移ったあとも `HERDR_PANE_ID` は古い値のままだが、herdr は古い ID も今のペインに解決するので herdr のコマンドはそのまま使える。
 - `gwt --task` は新しい Claude を起動して依頼する手動用の入口。人間に頼まれたとき以外は使わない。
 - When running the steps yourself instead of `gwt`, keep the same order:

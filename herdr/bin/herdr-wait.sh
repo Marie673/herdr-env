@@ -6,7 +6,7 @@
 # herdr-activity.sh が state_text と $act を待ち用の表示に差し替える。
 #
 # 使い方:
-#   herdr-wait set "CodeRabbit レビュー待ち"   … 印を立てる（--pane で他ペインも指定可）
+#   herdr-wait set "CodeRabbit レビュー待ち"   … 印を立てる（--pane で他ペインも指定可。GUI は --pane hc:<t>）
 #   herdr-wait set --pid <PID> "CI 待ち"       … PID のプロセスが生きている間だけ有効な印
 #   herdr-wait clear                           … 印を外す
 #   herdr-wait clear --if-pid <PID>            … その PID で立てた印のときだけ外す
@@ -19,6 +19,9 @@
 # 印は TTL（既定6時間）を過ぎると自動で無効になる。消し忘れても居座らない。
 # --pid 付きの印は、そのプロセスが終わった時点でも無効になる（監視ループが死んでも残らない）。
 #
+# Herdr の GUI（Herdr.app、HC_TERMINAL_ID がある）では、印を hc のラベル（herdr-env.*）に載せ、
+# GUI の mod（herdr-app/mods/herdr-env-marks）がそれを読んでサイドバーに出す。
+#
 # 人間の返事待ちの旗は、外部待ちの印より優先する。印が残っていても、人間に問いかけて
 # ターンを終えたペインは working に保たず「💬 要返答」と出す（印は消さずに残す）。
 
@@ -28,7 +31,7 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-wait"
 TTL_SECONDS="${HERDR_WAIT_TTL:-21600}"
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"
 }
 
 resolve_pane() {
@@ -46,6 +49,12 @@ resolve_pane() {
   fi
   if [ -n "${HERDR_ACTIVE_PANE_ID:-}" ]; then
     printf '%s' "$HERDR_ACTIVE_PANE_ID"
+    return 0
+  fi
+  # Herdr の GUI（Herdr.app）。ペインは herdr-core のターミナルで、HERDR_* は入らない。
+  # 印は "hc:<ターミナル>" の名前で持ち、表示は hc のラベル経由で GUI の mod に渡す。
+  if [ -n "${HC_TERMINAL_ID:-}" ]; then
+    printf 'hc:%s' "$HC_TERMINAL_ID"
     return 0
   fi
   return 1
@@ -104,12 +113,39 @@ is_human_turn() {
   [ -f "$(human_path "$1")" ]
 }
 
+# GUI（herdr-core）のターミナルに印と旗をラベルで載せる。表示は GUI の mod（herdr-env-marks）が
+# terminals() のラベルを読んで出す。TTL と --pid の生死は mod 側でも見る（このスクリプトが
+# 呼ばれないまま期限が来ても、表示が居座らないように）。
+#   herdr-env.human = 旗を立てた epoch（人間の返事待ち）
+#   herdr-env.wait  = 待ちのラベル / herdr-env.since = 開始 epoch / herdr-env.pid = 結びついた PID
+push_hc_labels() {
+  _t="$1"
+  _hc="$(command -v hc 2>/dev/null)" || return 0
+  _pane="hc:$_t"
+  _h=""
+  is_human_turn "$_pane" && _h="$(cat "$(human_path "$_pane")" 2>/dev/null)"
+  _w=""; _s=""; _p=""
+  if _m="$(read_marker "$_pane")"; then
+    _s="${_m%%	*}"
+    _w="${_m#*	}"
+    _p="$(marker_pid "$(marker_path "$_pane")")"
+  fi
+  "$_hc" label "$_t" \
+    "herdr-env.human=${_h}" \
+    "herdr-env.wait=${_w}" \
+    "herdr-env.since=${_s}" \
+    "herdr-env.pid=${_p}" >/dev/null 2>&1
+}
+
 # herdr に表示を反映させる。herdr-activity.sh と同じ source を使うので
 # 片方が書けばもう片方の表示も置き換わる。
 # 優先順位: 人間の返事待ち > 外部待ちの印 > 通常。$2 を渡せば $act はそれを使う。
 push_labels() {
   _pane="$1"
   _act="${2:-}"
+  case "$_pane" in
+    hc:*) push_hc_labels "${_pane#hc:}"; return 0 ;;
+  esac
   command -v herdr >/dev/null 2>&1 || return 0
   if is_human_turn "$_pane"; then
     [ -n "$_act" ] || _act="💬 要返答"
