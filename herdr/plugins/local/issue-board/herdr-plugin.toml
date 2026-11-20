@@ -5,7 +5,8 @@ min_herdr_version = "0.9.0"
 description = "指定したリポジトリの main の space で、右側に GitHub の issue 一覧（fzf）を出す。Enter で gwt して着手"
 platforms = ["macos"]
 
-# 対象のリポジトリは $HERDR_PLUGIN_CONFIG_DIR/config.json の repos（既定 ["ai-president-next"]）
+# 対象のリポジトリは $HERDR_PLUGIN_CONFIG_DIR/config.json の repos（例 {"repos": ["my-app"]}、"*" で全部）。
+# 既定は空で、設定するまでどこにも出さない
 
 [[startup]]
 command = ["/usr/bin/python3", "bin/ensure.py", "startup"]

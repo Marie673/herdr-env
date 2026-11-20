@@ -5,3 +5,4 @@ brew "gwq"     # git worktree 管理
 brew "fzf"     # dev / wt / gsw / new-workspace-picker が使用
 brew "jq"      # gwt / プラグイン / hooks が使用
 brew "gh"      # GitHub CLI（任意だが推奨）
+brew "bash"    # issue-board が bash 4 以上を使う（macOS 標準は 3.2）

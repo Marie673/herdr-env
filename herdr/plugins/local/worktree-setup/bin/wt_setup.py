@@ -13,7 +13,7 @@
 
 設定は $HERDR_PLUGIN_CONFIG_DIR/config.json（無ければ既定値）。repos の下にリポジトリのディレクトリ名で上書きを書く:
   {"default": {"install": true},
-   "repos": {"ai-president-next": {"install": false, "setup": [["npm", "run", "prepare"]]}}}
+   "repos": {"my-app": {"install": false, "setup": [["npm", "run", "prepare"]]}}}
 
 実行中はその space に $setup = "⚙ setup"、失敗したら "✗ setup" を出し、herdr の通知も出す。
 """
@@ -101,7 +101,7 @@ def load_config(repo_name):
 
 def child_env():
     env = dict(os.environ)
-    extra = [os.path.join(HOME, ".local/bin"), os.path.join(HOME, ".local/share/mise/shims"), "/opt/homebrew/bin"]
+    extra = [os.path.join(HOME, ".local/bin"), os.path.join(HOME, ".local/share/mise/shims"), "/opt/homebrew/bin", "/usr/local/bin"]
     env["PATH"] = ":".join(extra + [env.get("PATH", "/usr/bin:/bin")])
     # 依存のインストールに herdr のプラグイン文脈は要らない
     for k in list(env):

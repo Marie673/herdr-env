@@ -50,7 +50,7 @@ claude = [
   ],
 ]
 
-# codex は terminal_title が "Okazaki" 固定で会話タイトルにならないため、
+# codex は terminal_title がユーザー名などで固定で会話タイトルにならないため、
 # 識別の主役は tab に置く（claude の terminal_title_stripped に相当）
 codex = [
   [
