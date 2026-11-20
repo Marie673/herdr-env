@@ -3,7 +3,40 @@
 [Herdr](https://herdr.dev)（コーディングエージェント用ターミナルマルチプレクサ）を中心にした開発環境の設定一式。
 ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 worktree = 1 Herdr workspace = 1 Claude エージェント」** で作業する構成になっている。
 
-> **Claude Code へ**: このリポジトリを渡されたら、下の「セットアップ手順」を上から順に実行すれば環境を再現できる。ファイルの配置先は「ファイル対応表」に従うこと。既存ファイルがある場合は上書き前にユーザーへ確認する。
+*A set of dotfiles, scripts and Herdr plugins for running one Claude Code agent per git worktree on [Herdr](https://herdr.dev). Documentation is in Japanese.*
+
+## 動作環境
+
+- **macOS**（launchd・Keychain・`pbcopy` を使う。Linux で動くのは一部のスクリプトとプラグインだけ）
+- [Herdr](https://herdr.dev) 0.9 以降（一部のプラグインが `min_herdr_version = "0.9.0"`）
+- [Claude Code](https://claude.com/claude-code)
+- Homebrew で入れる CLI: herdr / ghq / gwq / fzf / jq / gh / bash（`Brewfile`）。worktree-setup は [mise](https://mise.jdx.dev) があれば使う
+- `/usr/bin/python3`（プラグインと `gwt-tasks` / `claude-account`。標準ライブラリだけで動く）
+
+## クイックスタート
+
+```sh
+brew bundle --file Brewfile
+ghq get Marie673/herdr-env
+cd "$(ghq list -p Marie673/herdr-env)"
+./install.sh --dry-run            # 何を置くか確かめる
+./install.sh                      # 置く（既にあって中身が違うファイルは飛ばす。--force で .bak を残して置き換え）
+./install.sh --launchd            # 定期実行（wt-audit --auto / PR 状態の取り直し）も入れるとき
+```
+
+`install.sh` が最後に出す「残りの手順」（`.zshrc` への `source`、`~/.claude/settings.json` へのマージなど）は手で行う。各ファイルの置き場所と役割は下の「ファイル対応表」と「セットアップ手順」にある。
+
+> **Claude Code にセットアップを任せる場合**: このリポジトリを渡して「README のセットアップ手順で入れて」と頼めばよい。ファイルの配置先は「ファイル対応表」に従い、既存ファイルがある場合は上書き前にユーザーへ確認すること。
+
+### 置き場所を変えたいとき
+
+既定のレイアウトは、ghq の root が `~/workspace`、gwq の worktree が `~/workspace/worktree/<host>/<owner>/<repo>=<branch>`。変えるときは次をそろえる。
+
+- `git config --global ghq.root` と、`~/.gitconfig` の `includeIf "gitdir:<ghq root>/"`（本体保護フックはこの配下だけに効く）
+- `~/.config/gwq/config.toml` の `worktree.basedir`
+- `~/.claude/settings.json` の `permissions.additionalDirectories`（worktree の置き場所）
+
+`zsh/gwq-herdr.zsh` は `ghq root` と `gwq config get worktree.basedir` を読むので書き換えは要らない。
 
 ## 全体像
 
@@ -39,14 +72,14 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 | `claude-accounts/accounts.example` | `~/.config/claude-accounts/accounts`（自分のアカウントに書き換える） |
 | `herdr/plugins/local/claude-accounts/` | `~/.config/herdr/plugins/local/claude-accounts/` |
 | `zsh/claude-account.zsh` | 任意の場所に置き `.zshrc` から `source`（`claude` 関数。`claude -A <id>`） |
-| `launchd/dev.marie673.wt-audit.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
+| `launchd/herdr-env.wt-audit.plist.in` | `~/Library/LaunchAgents/local.herdr-env.wt-audit.plist`（`install.sh --launchd` が `@HOME@` 等を埋めて置く） |
 | `herdr/plugins/local/agent-view-space/` | `~/.config/herdr/plugins/local/agent-view-space/` |
 | `herdr/plugins/local/pane-title-sync/` | `~/.config/herdr/plugins/local/pane-title-sync/` |
 | `herdr/plugins/local/pane-id-copy/` | `~/.config/herdr/plugins/local/pane-id-copy/` |
 | `herdr/plugins/local/pr-status/` | `~/.config/herdr/plugins/local/pr-status/` + `~/.local/bin/herdr-pr-status` へ symlink |
 | `herdr/plugins/local/worktree-setup/` | `~/.config/herdr/plugins/local/worktree-setup/` |
 | `herdr/plugins/local/issue-board/` | `~/.config/herdr/plugins/local/issue-board/` |
-| `launchd/dev.marie673.herdr-pr-status.plist` | `~/Library/LaunchAgents/`（パスの書き換えが必要） |
+| `launchd/herdr-env.herdr-pr-status.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-pr-status.plist`（同上） |
 | `zsh/gwq-herdr.zsh` | 任意の場所に置き `.zshrc` から `source` |
 | `git/hooks/reference-transaction` | `~/.config/git/hooks/reference-transaction`（要 `chmod +x`） |
 | `git/workspace.gitconfig` | `~/.config/git/workspace.gitconfig` |
@@ -59,13 +92,15 @@ ghq + gwq + herdr + Claude Code を組み合わせて、**「1ブランチ = 1 w
 
 ## セットアップ手順
 
+`install.sh` がやるのは 1〜3・5〜7 のうちファイルを置く部分（と `ghq.root` / `includeIf` が未設定なら設定）。ここでは中身と、手でやる部分を説明する。
+
 ### 1. CLI のインストール
 
 ```sh
 brew bundle --file Brewfile
 ```
 
-（herdr / ghq / gwq / fzf / jq / gh）
+（herdr / ghq / gwq / fzf / jq / gh / bash）
 
 ### 2. git: ghq root と本体保護フック
 
@@ -101,7 +136,7 @@ worktree は `~/workspace/worktree/github.com/<owner>/<repo>=<branch>` に作ら
 
 ```sh
 # 例: リポジトリを ghq 管理下に置いたまま source する
-echo 'source ~/workspace/github.com/Marie673/herdr-env/zsh/gwq-herdr.zsh' >> ~/.zshrc
+echo "source $(ghq list -p Marie673/herdr-env)/zsh/gwq-herdr.zsh" >> ~/.zshrc
 ```
 
 入るもの: `gwt`（作業開始の入口）, `dev`（fzf でリポジトリ/worktree へ cd）, `wt`/`wta`, `gsw`, `ghq-path`, ペイン間 cd 同期（`sync-group`/`follow`）。
@@ -198,14 +233,9 @@ wt-audit --auto --dry-run   # 自動で片付ける対象を確認
 
 #### 自動で片付ける
 
-`launchd/dev.marie673.wt-audit.plist` を `~/Library/LaunchAgents/` に置くと30分ごとに `wt-audit --auto` が走る。パス（`/Users/okazaki/...`）は自分の環境に書き換えること。
+`./install.sh --launchd` で `~/Library/LaunchAgents/local.herdr-env.wt-audit.plist` が入り、30分ごとに `wt-audit --auto` が走る（テンプレートは `launchd/herdr-env.wt-audit.plist.in`。手で置くなら `@HOME@` と `@BREW_PREFIX@` を書き換えて `launchctl bootstrap gui/$(id -u) <plist>`）。
 
-```sh
-cp launchd/dev.marie673.wt-audit.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.marie673.wt-audit.plist
-```
-
-片付けたときは herdr の通知が出る。ログは `~/.local/state/wt-audit/audit.log`。止めるときは `launchctl bootout gui/$(id -u)/dev.marie673.wt-audit`。
+片付けたときは herdr の通知が出る。ログは `~/.local/state/wt-audit/audit.log`。止めるときは `launchctl bootout gui/$(id -u)/local.herdr-env.wt-audit`。
 
 実装上の注意:
 
@@ -282,11 +312,7 @@ Herdr 0.8.2 では config の `agent_panel_scope` は**効かない**（パー�
 - `gh-ci-wait` の checks の状態が変わったときと、終わったとき（`herdr-pr-status sync --path "$PWD" --fresh`）
 - launchd で毎分（見ていない space のレビューや merge を拾う。GraphQL は1回3ポイントで、リポジトリごとに1回）
 
-```sh
-cp launchd/dev.marie673.herdr-pr-status.plist ~/Library/LaunchAgents/
-mkdir -p ~/.local/state/herdr-pr-status
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.marie673.herdr-pr-status.plist
-```
+定期実行は `./install.sh --launchd` で入る（`local.herdr-env.herdr-pr-status`、テンプレートは `launchd/herdr-env.herdr-pr-status.plist.in`）。
 
 トークンの TTL は30分なので、定期実行が止まれば古い表示は勝手に消える。
 
@@ -313,7 +339,7 @@ done
 
 ```json
 {"default": {"install": true},
- "repos": {"ai-president-next": {"setup": [["npm", "run", "prepare"]]}}}
+ "repos": {"my-app": {"setup": [["npm", "run", "prepare"]]}}}
 ```
 
 やり直すときは、その space でプラグインアクション「このワークツリーのセットアップをやり直す」（`herdr plugin action invoke worktree-setup.rerun`）。
@@ -322,24 +348,24 @@ space が閉じたとき・ワークツリーが消えたとき（`workspace.clo
 
 #### issue-board: main の space の右に issue / PR 一覧を出す
 
-対象リポジトリ（既定 `ai-president-next`）の **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。`^t` で open な PR の一覧（作成の新しい順）に切り替わる。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
+`config.json` に書いたリポジトリの **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。`^t` で open な PR の一覧（作成の新しい順）に切り替わる。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
 
 | キー | 動き |
 |---|---|
-| `↵` | 着手。タイトルから haiku がブランチ名 `<type>/<english-slug>-<番号>`（例 `feat/persist-selected-ai-president-351`）を作り、確認画面で直してから `gwt --task` で切って、新しい space の Claude Code に issue を渡す。ブランチ名がそのまま space 名になるので、内容が分かる名前にしている。番号入りのワークツリーが既にあれば、その space へ移るだけ |
+| `↵` | 着手。タイトルから haiku がブランチ名 `<type>/<english-slug>-<番号>`（例 `feat/add-login-rate-limit-351`）を作り、確認画面で直してから `gwt --task` で切って、新しい space の Claude Code に issue を渡す。ブランチ名がそのまま space 名になるので、内容が分かる名前にしている。番号入りのワークツリーが既にあれば、その space へ移るだけ |
 | `^t` | issue と PR を切り替える |
 | `^o` | ブラウザで開く |
 | `^r` | 取り直す（普段は1分ごとと、そのタブに来たときに自動。gh の結果は全一覧で共有して30秒使い回す） |
 | `^p` | プレビュー（本文と最新コメント2件）の表示切り替え |
 
-PR の一覧（`^t`）は、pr-status と同じ GraphQL 1回で取り、行に状態を並べる: `● #485 競合 CR✓ 未解決1 feat(knowledge): … @Marie673`（`●` はそのブランチのワークツリーがある）。プレビューは checks（失敗・実行中が上）と本文で、一覧のキャッシュから出すので gh は呼ばない。`↵` はそのブランチの space へ移る。space が無ければ「Claude Code つきで開く / シェルだけで開く（見るだけ）」を選んで `gwt` する（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）。
+PR の一覧（`^t`）は、pr-status と同じ GraphQL 1回で取り、行に状態を並べる: `● #485 競合 CR✓ 未解決1 feat(knowledge): … @octocat`（`●` はそのブランチのワークツリーがある）。プレビューは checks（失敗・実行中が上）と本文で、一覧のキャッシュから出すので gh は呼ばない。`↵` はそのブランチの space へ移る。space が無ければ「Claude Code つきで開く / シェルだけで開く（見るだけ）」を選んで `gwt` する（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）。
 
 モード（issue / PR）は一覧ペインごとに state のファイルで持ち、`^t` は `transform(mode.sh switch)` 1つで切り替える。`execute-silent(...)+reload(...)+transform-prompt(...)` のように reload の後ろに操作をつなぐと、読み込み中に押したときに後ろの操作（プロンプトの更新など）が落ちることがあった。
 
 ワークツリーのブランチ名に番号が入っている issue には `●` が付く。ブランチ名を作る `claude -p` は `--setting-sources project` で一時ディレクトリから呼び、自分の hooks（herdr への状態報告など）を走らせない（`--bare` だとログイン情報も読まれず失敗する）。着手時は `HERDR_PANE_ID` を外して `gwt` を呼ぶので、依頼元はこの一覧ペインにならず、agent の質問は人間に来る。
 
 - 出し入れ: `prefix+shift+i`（`issue-board.toggle`）。消した space では自動で開かなくなる
-- 対象と幅: `$(herdr plugin config-dir issue-board)/config.json` に `{"repos": ["ai-president-next"], "width": 0.34}`
+- 対象と幅: `$(herdr plugin config-dir issue-board)/config.json` に `{"repos": ["my-app"], "width": 0.34}`。`repos` はリポジトリのディレクトリ名で、`"*"` なら全リポジトリ。**既定は空なので、書くまでどこにも出ない**
 - herdr のペイン情報にはプラグインの所有者が出ないので、開いたペインは `~/.local/state/herdr/plugins/issue-board/state.json` に tab_id → pane_id で覚えている
 - `--cwd` を付けて `plugin pane open` すると、マニフェストの相対パス（`bin/board.sh`）が解決できずに即終了する。リポジトリは環境変数 `ISSUE_BOARD_REPO_ROOT` で渡している
 - `pane resize --amount` はタブ幅に対する割合で、`0` を渡すと変えずにレイアウトだけ返る。これで今の幅を測ってから合わせている
@@ -502,3 +528,7 @@ prefix+shift+a         # agents ペインの「現在の space だけ / 全部�
 - `plugins/github/` 配下 — `herdr plugin install` で再取得する
 - `agent-view-space/scope`, `pane-title-sync/state.json` — プラグインのランタイム状態
 - `~/.local/state/gwt-tasks/` — `gwt-tasks` の台帳（その環境で出した依頼そのもの）
+
+## ライセンス
+
+[MIT](LICENSE)

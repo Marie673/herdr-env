@@ -4,7 +4,7 @@
 set -u
 dir="$(cd "$(dirname "$0")" && pwd)"
 export ISSUE_BOARD_REPO_ROOT="${ISSUE_BOARD_REPO_ROOT:-$PWD}"
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 export BOARD_ID="${HERDR_PANE_ID:-$$}"   # モード（issue / pr）をペインごとに持つためのキー
 export FZF_DEFAULT_COMMAND="$dir/list.sh"
 cd "$ISSUE_BOARD_REPO_ROOT" || exit 1

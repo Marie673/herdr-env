@@ -20,7 +20,8 @@ HOME = os.path.expanduser("~")
 HERDR = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr") or "/opt/homebrew/bin/herdr"
 CONFIG_DIR = os.environ.get("HERDR_PLUGIN_CONFIG_DIR") or os.path.join(HOME, ".config/herdr/plugins/config", PLUGIN)
 STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(HOME, ".local/state/herdr/plugins", PLUGIN)
-DEFAULTS = {"repos": ["ai-president-next"], "width": 0.34}
+# repos: 一覧を出すリポジトリのディレクトリ名。既定は空（どこにも出さない）。"*" なら全リポジトリ
+DEFAULTS = {"repos": [], "width": 0.34}
 
 
 def herdr(*args):
@@ -66,7 +67,10 @@ def target_workspace(ws_id, conf):
     res = herdr("workspace", "get", ws_id)
     ws = (res or {}).get("workspace") or {}
     wt = ws.get("worktree") or {}
-    if wt.get("is_linked_worktree") or wt.get("repo_name") not in conf["repos"]:
+    repos = conf.get("repos") or []
+    if wt.get("is_linked_worktree") or not wt.get("repo_name"):
+        return None
+    if "*" not in repos and wt["repo_name"] not in repos:
         return None
     return ws
 

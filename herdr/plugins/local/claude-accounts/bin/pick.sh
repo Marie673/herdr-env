@@ -1,7 +1,7 @@
 #!/bin/bash
 # アカウントを選ぶ。Enter: 新しいタブで起動 / ctrl-s: 元のペインの会話をそのアカウントで開き直す
 # 未ログインのアカウントを選ぶと、その場でログインする
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 origin="${CLAUDE_ACCOUNT_ORIGIN_PANE:-}"
 current=""
 if [ -n "$origin" ]; then

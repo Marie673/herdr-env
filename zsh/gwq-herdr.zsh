@@ -3,18 +3,25 @@
 # 依存: ghq, gwq, herdr, fzf, jq
 
 # ------ ターミナルタイトル用の短縮パス ------
-# workspace 配下のパスから短縮タイトルを生成
-#   ~/workspace/worktree/github.com/owner/repo=branch → owner/repo=branch
-#   ~/workspace/github.com/owner/repo                → owner/repo
-#   その他 workspace 配下                             → workspace/以降
-#   workspace 外                                     → ベースネーム
+# ghq root / gwq の worktree.basedir 配下のパスから短縮タイトルを生成
+#   <gwq basedir>/github.com/owner/repo=branch → owner/repo=branch
+#   <ghq root>/github.com/owner/repo           → owner/repo
+#   その他 ghq root 配下                        → ghq root 以降
+#   それ以外                                    → ベースネーム
+# ghq / gwq の設定は source した時点で1回だけ読む（既定は ~/workspace と ~/workspace/worktree）
+_HERDR_ENV_GHQ_ROOT="$(ghq root 2>/dev/null)"
+_HERDR_ENV_GHQ_ROOT="${_HERDR_ENV_GHQ_ROOT:-$HOME/workspace}"
+_HERDR_ENV_WT_BASE="$(gwq config get worktree.basedir 2>/dev/null)"
+_HERDR_ENV_WT_BASE="${_HERDR_ENV_WT_BASE:-$_HERDR_ENV_GHQ_ROOT/worktree}"
+_HERDR_ENV_WT_BASE="${_HERDR_ENV_WT_BASE/#\~/$HOME}"
+
 _workspace_shortpath() {
     local p="$1"
     case "$p" in
-        */workspace/worktree/github.com/*) echo "${p#*/workspace/worktree/github.com/}" ;;
-        */workspace/github.com/*)          echo "${p#*/workspace/github.com/}" ;;
-        */workspace/*)                     echo "${p#*/workspace/}" ;;
-        *)                                 echo "${p##*/}" ;;
+        "$_HERDR_ENV_WT_BASE"/*.*/*)  p="${p#"$_HERDR_ENV_WT_BASE"/}"; echo "${p#*/}" ;;
+        "$_HERDR_ENV_GHQ_ROOT"/*.*/*) p="${p#"$_HERDR_ENV_GHQ_ROOT"/}"; echo "${p#*/}" ;;
+        "$_HERDR_ENV_GHQ_ROOT"/*)   echo "${p#"$_HERDR_ENV_GHQ_ROOT"/}" ;;
+        *)                          echo "${p##*/}" ;;
     esac
 }
 

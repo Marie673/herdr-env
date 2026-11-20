@@ -2,7 +2,7 @@
 
 set -u
 
-herdr_bin="${HERDR_BIN_PATH:-/opt/homebrew/bin/herdr}"
+herdr_bin="${HERDR_BIN_PATH:-$(command -v herdr || echo /opt/homebrew/bin/herdr)}"
 root=$(ghq root) || exit 1
 
 out=$(
