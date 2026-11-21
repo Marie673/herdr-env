@@ -15,11 +15,7 @@ title=$(printf '%s' "$pr" | jq -r .title)
 
 path=$(git worktree list --porcelain | awk -v b="branch refs/heads/$branch" '/^worktree /{p=substr($0,10)} $0==b{print p}')
 if [ -n "$path" ]; then
-  ws=$(herdr workspace list | jq -r --arg p "$path" '.result.workspaces[] | select(.worktree.checkout_path == $p) | .workspace_id' | head -1)
-  if [ -n "$ws" ]; then
-    herdr workspace focus "$ws" >/dev/null
-    exit 0
-  fi
+  "$dir/focus-space.sh" "$path" && exit 0
 fi
 
 clear

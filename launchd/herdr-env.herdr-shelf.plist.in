@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  使い終わった agent のセッションを棚にしまう（herdr-shelf shelve）。1時間ごと。
+  24時間触っていない idle の agent を、TUI と GUI（Herdr.app）の両方から棚に移す。開き直しは herdr-shelf restore。
+  install.sh --launchd が ~/Library/LaunchAgents/ に置いて launchctl bootstrap する。
+  @HOME@ / @BREW_PREFIX@ は install.sh --launchd が埋める（手で置くなら書き換える）。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.herdr-env.herdr-shelf</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>herdr-shelf shelve --hours 24</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:@BREW_PREFIX@/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/.local/state/herdr-shelf/shelf.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.local/state/herdr-shelf/shelf.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

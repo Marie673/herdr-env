@@ -2,16 +2,21 @@
 """ワークツリーの space に、そのブランチの PR 状態をトークンで出す。
 
   pr_status.py sync --all [--fresh]       全ワークツリーの space を付け直す（startup / launchd）
-  pr_status.py sync --workspace <id>      1つの space だけ
+  pr_status.py sync --workspace <id>      1つの space だけ（TUI の workspace ID か GUI の space ID）
   pr_status.py sync --path <dir> [--fresh]  そのディレクトリを含むワークツリーの space（gh-ci-wait から）
   pr_status.py event                      プラグインのイベントフック（worktree.opened / workspace.focused /
                                           pane.agent_status_changed で idle・done になったとき）
 
-出すトークン（workspace.report_metadata、source = plugin:pr-status）:
+出すトークン（TUI: workspace.report_metadata、source = plugin:pr-status）:
   $pr  "#123" / "#123 draft" / "#123 競合" / "#123 merged" / "#123 closed"
   $ci  "CI ✓" / "CI …" / "CI ✗2"          CodeRabbit を除いた checks
   $rv  "CR …" / "CR ✓" と "要修正" / "未解決3" / "承認" を並べたもの
 PR が無いブランチはトークンを消す。
+
+Herdr の GUI（Herdr.app）にも同じものを出す。GUI はプラグインを読まないので、worktree にいる Space の
+ターミナルに hc のラベル herdr-env.pr / herdr-env.ci / herdr-env.rv と herdr-env.pr_at（書いた epoch。
+spaces-env が30分で古いとみなす）を付け、spaces-env の mod が Spaces 一覧の行に出す。Space の場所は、
+GUI がブランチを出すのと同じく、最初のターミナルがいまいるディレクトリで決める。
 
 gh の呼び出しはリポジトリごとに GraphQL 1回（open な PR をまとめて取る）。open に無いブランチだけ
 `gh pr list --head` で1回引き、merged / closed / PR 無しを state に覚えておく。
@@ -38,6 +43,10 @@ CODERABBIT = "coderabbit"
 
 STATE_DIR = os.path.expanduser("~/.local/state/herdr-pr-status")
 HERDR = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr") or "/opt/homebrew/bin/herdr"
+HERDR_APP = shutil.which("herdr-app") or "/Applications/Herdr.app/Contents/MacOS/Herdr"
+HC = shutil.which("hc") or os.path.expanduser("~/.local/bin/hc")
+GUI_PREFIX = "herdr-env."
+GUI_REFRESH_SEC = 5 * 60         # 中身が同じでも、この間隔で pr_at を書き直す（30分の失効より十分短く）
 GH = shutil.which("gh") or "/opt/homebrew/bin/gh"
 GIT = shutil.which("git") or "/usr/bin/git"
 
@@ -64,13 +73,15 @@ def log(msg):
     sys.stderr.write("[pr-status] %s\n" % msg)
 
 
-def run(cmd, cwd=None, timeout=60):
+def run(cmd, cwd=None, timeout=60, quiet=False):
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         log("%s: %s" % (" ".join(cmd[:4]), e))
         return None
     if p.returncode != 0:
+        if quiet:
+            return None
         log("%s: %s" % (" ".join(cmd[:4]), (p.stderr or p.stdout).strip()[:300]))
         return None
     return p.stdout
@@ -111,7 +122,9 @@ def save_state(st):
 # ---------- 対象の space ----------
 
 def worktree_workspaces():
-    """linked worktree の space を [(workspace_id, checkout_path, repo_root)] で返す"""
+    """TUI の linked worktree の space を [("tui", workspace_id, checkout_path, repo_root)] で返す"""
+    if not os.path.exists(HERDR):
+        return []
     res = herdr_json("workspace", "list")
     if not res:
         return []
@@ -119,8 +132,69 @@ def worktree_workspaces():
     for ws in res.get("workspaces", []):
         wt = ws.get("worktree") or {}
         if wt.get("is_linked_worktree") and wt.get("checkout_path"):
-            out.append((ws["workspace_id"], wt["checkout_path"], wt.get("repo_root") or wt["checkout_path"]))
+            out.append(("tui", ws["workspace_id"], wt["checkout_path"], wt.get("repo_root") or wt["checkout_path"]))
     return out
+
+
+def hc_get(term):
+    out = run([HC, "get", term, "--json"], timeout=10)
+    try:
+        return json.loads(out) if out else None
+    except ValueError:
+        return None
+
+
+def linked_worktree(path):
+    """linked worktree なら (checkout_path, repo_root)、そうでなければ None"""
+    out = run([GIT, "-C", path, "rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir"], timeout=10, quiet=True)
+    if not out:
+        return None
+    lines = out.strip().splitlines()
+    if len(lines) != 3:
+        return None
+    top, gdir, common = lines
+    gdir = os.path.realpath(os.path.join(path, gdir))
+    common = os.path.realpath(os.path.join(path, common))
+    if gdir == common:
+        return None
+    return top, os.path.dirname(common)
+
+
+def gui_spaces():
+    """GUI の Space を [(space_id, [terminal...], いまの場所)] で返す。窓が無ければ []"""
+    if not (os.path.exists(HERDR_APP) and os.path.exists(HC)):
+        return []
+    out = run([HERDR_APP, "ls"], timeout=15)
+    try:
+        spaces = json.loads(out).get("spaces", []) if out else []
+    except ValueError:
+        return []
+    res = []
+    for sp in spaces:
+        terms = [x["terminal"] for tab in sp.get("tabs", []) for x in tab.get("terminals", []) if x.get("terminal")]
+        if not terms or sp.get("machine"):
+            continue  # 別マシンの Space は、この Mac の git では見られない
+        info = hc_get(terms[0]) or {}
+        where = (info.get("foreground") or {}).get("cwd") or info.get("last_cwd") or info.get("cwd") or sp.get("folder")
+        res.append((sp["id"], terms, where))
+    return res
+
+
+def gui_targets(clear_rest=True):
+    """GUI の worktree の Space を [("gui", space_id, checkout_path, repo_root, terminals)] で返す。
+    clear_rest なら、worktree でなくなった Space に残ったラベルをここで消す"""
+    out = []
+    for sp_id, terms, where in gui_spaces():
+        wt = linked_worktree(where) if where and os.path.isdir(where) else None
+        if wt:
+            out.append(("gui", sp_id, wt[0], wt[1], terms))
+        elif clear_rest:
+            report_gui(terms, {})
+    return out
+
+
+def all_targets():
+    return worktree_workspaces() + gui_targets()
 
 
 def current_branch(path):
@@ -253,7 +327,35 @@ def render(pr):
     return tokens
 
 
-def report(workspace_id, tokens):
+def report_gui(terms, tokens):
+    """Space のターミナル全部に herdr-env.pr / ci / rv / pr_at を付ける（無いものは消す）"""
+    now = int(time.time())
+    for term in terms:
+        info = hc_get(term)
+        if not info or info.get("state") != "live":
+            continue
+        cur = info.get("labels") or {}
+        want = {GUI_PREFIX + k: tokens.get(k, "") for k in TOKENS}
+        same = all(cur.get(k, "") == v for k, v in want.items())
+        if not any(want.values()):
+            if any(cur.get(GUI_PREFIX + k) for k in TOKENS + ("pr_at",)):
+                run([HC, "label", term] + ["%s=" % (GUI_PREFIX + k) for k in TOKENS + ("pr_at",)], timeout=10)
+            continue
+        try:
+            fresh = now - int(cur.get(GUI_PREFIX + "pr_at") or 0) < GUI_REFRESH_SEC
+        except ValueError:
+            fresh = False
+        if same and fresh:
+            continue
+        run([HC, "label", term] + ["%s=%s" % (k, v) for k, v in want.items()]
+            + ["%spr_at=%d" % (GUI_PREFIX, now)], timeout=10)
+
+
+def report(target, tokens):
+    if target[0] == "gui":
+        report_gui(target[4], tokens)
+        return
+    workspace_id = target[1]
     cmd = [HERDR, "workspace", "report-metadata", workspace_id, "--source", SOURCE, "--ttl-ms", str(TTL_MS)]
     for k in TOKENS:
         if tokens.get(k):
@@ -266,7 +368,7 @@ def report(workspace_id, tokens):
 # ---------- 本体 ----------
 
 def sync(targets, max_age):
-    """targets: [(workspace_id, checkout_path, repo_root)]"""
+    """targets: [("tui", workspace_id, checkout_path, repo_root) / ("gui", space_id, checkout_path, repo_root, terminals)]"""
     if not targets:
         return
     lock = open(state_path("lock"), "w")
@@ -275,17 +377,17 @@ def sync(targets, max_age):
         st = load_state()
         by_repo = {}
         for t in targets:
-            by_repo.setdefault(t[2], []).append(t)
+            by_repo.setdefault(t[3], []).append(t)
         for repo_root, items in by_repo.items():
             prs = fetch_open_prs(repo_root, st, max_age)
             if prs is None:
                 continue  # gh が使えないときは前の表示を残す（TTL で消える）
-            for ws_id, path, _ in items:
-                branch = current_branch(path)
+            for t in items:
+                branch = current_branch(t[2])
                 pr = None
                 if branch:
                     pr = prs.get(branch) or lookup_closed(repo_root, branch, st)
-                report(ws_id, render(pr))
+                report(t, render(pr))
         save_state(st)
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
@@ -297,7 +399,7 @@ def find_by_path(path):
     if not top:
         return []
     top = os.path.realpath(top.strip())
-    return [t for t in worktree_workspaces() if os.path.realpath(t[1]) == top]
+    return [t for t in worktree_workspaces() + gui_targets(clear_rest=False) if os.path.realpath(t[2]) == top]
 
 
 def find_key(obj, key):
@@ -334,7 +436,7 @@ def cmd_event():
     ws_id = find_value(ev, "workspace_id") or os.environ.get("HERDR_WORKSPACE_ID")
     if not ws_id:
         return
-    targets = [t for t in worktree_workspaces() if t[0] == ws_id]
+    targets = [t for t in worktree_workspaces() if t[1] == ws_id]
     sync(targets, max_age)
 
 
@@ -371,9 +473,9 @@ def main():
         cmd_event()
     elif args.cmd == "sync":
         if args.all:
-            targets = worktree_workspaces()
+            targets = all_targets()
         elif args.workspace:
-            targets = [t for t in worktree_workspaces() if t[0] == args.workspace]
+            targets = [t for t in worktree_workspaces() + gui_targets(clear_rest=False) if t[1] == args.workspace]
         else:
             targets = find_by_path(args.path)
         sync(targets, 0 if args.fresh else args.max_age)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# PR のプレビュー（一覧のキャッシュから。gh は呼ばない）: 見出し・ブランチ・checks・本文
+# PR のプレビュー（一覧のキャッシュから。gh は呼ばない）: 見出し・ブランチ・ラベル・checks・本文
 dir="$(cd "$(dirname "$0")" && pwd)"
 n="${1:-}"
 case "$n" in ''|*[!0-9]*) exit 0 ;; esac
@@ -22,6 +22,7 @@ case "$n" in ''|*[!0-9]*) exit 0 ;; esac
       + (if .mergeable == "CONFLICTING" then "  \u001b[31m競合\u001b[90m" else "" end)
       + (if .reviewDecision != null and .reviewDecision != "" then "  \(.reviewDecision)" else "" end)
       + "  未解決スレッド \([.reviewThreads.nodes[] | select(.isResolved | not)] | length)\u001b[0m",
+    (if ((.labels.nodes // []) | length) > 0 then "ラベル: " + ([.labels.nodes[].name] | join(", ")) else empty end),
     "",
     (if ($ctx | length) > 0 then
        "\u001b[1mchecks\u001b[0m",

@@ -3,7 +3,7 @@
 #   prs.sh [--fresh]   キャッシュ（リポジトリごと・全一覧で共有、30秒）を使わず gh を引き直す
 # 並びは作成の新しい順（番号の大きい順）
 #   prs.sh --json      キャッシュの JSON をそのまま出す（pr-preview.sh / pr-open.sh 用）
-# 表示: ●（ワークツリーあり） #番号 状態（draft 競合 CI CR 要修正/未解決/承認） タイトル @作成者
+# 表示: ●（ワークツリーあり） #番号 状態（draft 競合 CI CR 要修正/未解決/承認） ラベル（GitHub の色） タイトル @作成者
 set -u
 root="${ISSUE_BOARD_REPO_ROOT:-$PWD}"
 cache_dir="$HOME/.local/state/herdr/plugins/issue-board"
@@ -17,6 +17,7 @@ query($owner: String!, $repo: String!) {
       nodes {
         number title body url headRefName isDraft isCrossRepository reviewDecision mergeable updatedAt
         author { login }
+        labels(first: 20) { nodes { name color } }
         commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { name status conclusion detailsUrl }
@@ -47,6 +48,12 @@ fi
 
 branches=$(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n 's#^branch refs/heads/##p')
 jq -r --arg br "$branches" '
+  def chip: (.color // "888888") as $h
+    | ([$h | ascii_downcase | explode[] | if . >= 97 then . - 87 else . - 48 end]) as $d
+    | [($d[0] * 16 + $d[1]), ($d[2] * 16 + $d[3]), ($d[4] * 16 + $d[5])] as $rgb
+    | (if ($rgb[0] * 299 + $rgb[1] * 587 + $rgb[2] * 114) / 1000 > 140 then "30" else "97" end) as $fg
+    | "\u001b[48;2;\($rgb[0]);\($rgb[1]);\($rgb[2]);\($fg)m \(.name) \u001b[0m";
+  def chips($ls): if ($ls | length) > 0 then ($ls | map(chip) | join(" ")) + " " else "" end;
   def cls:
     if .__typename == "CheckRun" then
       if .status != "COMPLETED" then "pending"
@@ -79,6 +86,7 @@ jq -r --arg br "$branches" '
     + (if (.headRefName as $h | $b | index($h)) then c("33"; "●") + " " else "  " end)
     + c("36"; "#\(.number)") + " "
     + (if ($badges | length) > 0 then ($badges | join(" ")) + " " else "" end)
+    + chips(.labels.nodes // [])
     + .title
     + c("90"; "  @\(.author.login // "?")")
 ' "$cache"

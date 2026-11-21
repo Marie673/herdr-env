@@ -36,11 +36,9 @@ existing=$(git worktree list --porcelain | sed -n 's#^branch refs/heads/##p' \
   | grep -E "(^|[^0-9])$n($|[^0-9])" | head -1)
 if [ -n "$existing" ]; then
   path=$(git worktree list --porcelain | awk -v b="branch refs/heads/$existing" '/^worktree /{p=substr($0,10)} $0==b{print p}')
-  ws=$(herdr workspace list | jq -r --arg p "$path" '.result.workspaces[] | select(.worktree.checkout_path == $p) | .workspace_id' | head -1)
   printf '既にワークツリーがあります: %s\n' "$existing"
-  if [ -n "$ws" ]; then
-    printf 'space %s へ移ります\n' "$ws"
-    herdr workspace focus "$ws" >/dev/null
+  if "$(dirname "$0")/focus-space.sh" "$path"; then
+    printf 'その space へ移りました\n'
     exit 0
   fi
   printf 'space が開いていません。開きますか [y/N] '
