@@ -58,10 +58,12 @@ if [ "$GUI" = 1 ]; then
   case "$action" in
     prompt) "$HW" human off >/dev/null 2>&1 ;;
     stop)
-      if ends_with_question; then "$HW" human on >/dev/null 2>&1; else "$HW" human off >/dev/null 2>&1; fi
-      # gwt が予約した「このペインの会話をワークツリーのスペースへ移す」を、ターンの終わりに実行する
+      asked=0
+      if ends_with_question; then asked=1; "$HW" human on >/dev/null 2>&1; else "$HW" human off >/dev/null 2>&1; fi
+      # gwt が予約した「このペインの会話をワークツリーのスペースへ移す」を、ターンの終わりに実行する。
+      # 人間に聞いて終わったターンでなければ、移った先で続きを自動で進める（TUI の gwt と同じく止まらない）
       HG="$HOME/.config/herdr/bin/herdr-gui.sh"
-      [ -x "$HG" ] && printf '%s' "$input" | "$HG" move-on-stop >/dev/null 2>&1
+      [ -x "$HG" ] && printf '%s' "$input" | HERDR_GUI_ASKED="$asked" "$HG" move-on-stop >/dev/null 2>&1
       ;;
     clear) "$HW" human off >/dev/null 2>&1 ;;
   esac

@@ -9,6 +9,7 @@
 #   herdr-gui open <branch> <worktree> [--no-agent] [--no-focus] [--task <文>]
 #                                       … ワークツリーをスペースとして開く（gwt が呼ぶ）
 #   herdr-gui move-on-stop              … Stop フックの入力を標準入力で受け、移動の予約があれば実行する
+#                                         （HERDR_GUI_ASKED=1 なら移った先で続きを促さない）
 #   herdr-gui cancel                    … このターミナルの移動の予約を取り消す
 #
 # agent（Claude Code）のペインから gwt を呼んだときは、新しい agent を立てずに会話ごと移す。
@@ -17,6 +18,9 @@
 # そこで「ターンが終わったら、ワークツリーのスペースで同じ会話を --resume し、元のペインを閉じる」
 # を予約し、Stop フック（herdr-activity.sh）がそれを実行する。ターンの途中で閉じると、
 # 最後のツール結果がトランスクリプトに残らないため。
+# TUI ではペインがターンの途中で移り、agent はそのまま作業を続ける。GUI でも止まらないよう、
+# 再開するときに「移ったので続きを進めて」を最初の入力として渡す。ただし人間に聞いて終わった
+# ターン（Stop フックが HERDR_GUI_ASKED=1 を渡す）では渡さず、返事を待つ。
 set -u
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-env/gui-move"
@@ -163,9 +167,19 @@ cmd_move_on_stop() {
         if .skip then .skip = false
         elif ($a[$i] | test("^(-r|--resume|--session-id|--fork-session)$")) then .skip = ($a[$i] != "--fork-session")
         elif ($a[$i] | test("^(-c|--continue)$|^--resume=|^--session-id=")) then .
+        elif ($a[$i] | startswith("--dangerously")) and (.out | index([$a[$i]])) then .
         else .out += [$a[$i]] end)
     | .out[]' <<<"$info")
   argv_q="$(quote_words claude ${argv[@]+"${argv[@]}"} --resume "$sid")"
+  # 続きを促す最初の入力。日本語をシェルの引用に通すと化けるので、ファイルに書いて起動時に読む
+  if [ "${HERDR_GUI_ASKED:-0}" != 1 ]; then
+    local tf
+    mkdir -p "$STATE_DIR/tasks"
+    if tf="$(mktemp "$STATE_DIR/tasks/resume.XXXXXX")"; then
+      printf '%s' "（自動）gwt の予約どおり、この会話をワークツリー ${wt} のスペースに移しました。作業ディレクトリはワークツリーです。移る前に予定していた続きを、そのまま進めてください。" > "$tf"
+      argv_q+=" \"\$(<$(printf '%q' "$tf"))\"; rm -f $(printf '%q' "$tf")"
+    fi
+  fi
   [ -n "${CLAUDE_CONFIG_DIR:-}" ] && argv_q="CLAUDE_CONFIG_DIR=$(printf '%q' "$CLAUDE_CONFIG_DIR") $argv_q"
   # 元の claude が終わるのを待ってから再開する（同じ会話を2つのプロセスで開かない）
   cmd=""
