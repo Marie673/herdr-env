@@ -7,7 +7,7 @@ TUI の agent-view-space プラグインの GUI 版。Herdr 標準の mod はコ
 
   - 既定は「選んでいる Space だけ」。Agents 見出しの右のボタンか cmd+shift+a で全部 / この Space を切り替える
   - 切り替えは shared("herdr-env.agents.scope") に持つ（"all" で全部）
-  - Claude のアカウントを2つ以上使っているときは、行にアカウントの印（🟦 / 🟪、claude-account のラベル）を出す
+  - Claude のアカウントを2つ以上使っているときは、行にアカウントの色の丸（claude-account の印 🟦 / 🟪 の色）を出す
 
 使い方: python3 agents-env.py [--home ~/.config/herdr-app]
 """
@@ -81,14 +81,16 @@ patch('            .child(div().text_size(11.5).font_medium().text_color(t.dim).
       "header")
 
 # 5. どのアカウントで動いているか（claude-account が付ける herdr-env.acct の先頭の印 🟦 / 🟪）を行に出す。
-#    アカウントを2つ以上使っているときだけ（1つなら言うまでもない）
+#    アカウントを2つ以上使っているときだけ（1つなら言うまでもない）。絵文字のままだと浮くので、テーマの色の小さな丸にする
 patch("    const all = terminals();\n",
       "    const all = terminals();\n"
       "    const acctOf = new Map(all.map((x) => [x.address, (x.labels ?? {})[\"herdr-env.acct\"] || \"\"]));\n"
       "    const manyAccts = new Set(all.filter((x) => x.state === \"live\").map((x) => (x.labels ?? {})[\"herdr-env.acct_id\"]).filter(Boolean)).size > 1;\n",
       "accounts")
 patch("        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))\n",
-      "        .when(manyAccts && Boolean(acctOf.get(a.address)), el => el.child(div().flex_none().text_size(10).child([...acctOf.get(a.address)][0])))\n"
+      "        .when(manyAccts && Boolean(acctOf.get(a.address)), el => el.child(div().size(6).flex_none().rounded(3)"
+      ".bg(t[{ \"🟦\": \"ansi4\", \"🟩\": \"ansi2\", \"🟪\": \"ansi5\", \"🟥\": \"ansi1\", \"🟨\": \"ansi3\", \"🟧\": \"ansi3\" }[[...acctOf.get(a.address)][0]]] ?? t.dim)"
+      ".tooltip(acctOf.get(a.address))))\n"
       "        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))\n",
       "row account")
 

@@ -10,6 +10,7 @@
 // その下に、Claude のアカウントごとの上限の残り（5h / 7d）を出す。claude-account が statusLine から
 // 各ターミナルに付けるラベルを読む: herdr-env.acct_id / herdr-env.acct（表示名）/ herdr-env.lim / herdr-env.lim_at。
 // 上限はアカウント単位なので、同じアカウントのターミナルのうち一番新しい値を使う。6時間たった値は出さない。
+// 下部のステータスバーに利用量を出す mod（workspace-status-env）を入れているときは、重ねて出さない。
 //
 // キーの受け口（keys.json から `herdr-env-marks.<command>`）:
 //   accounts … アカウントを選んで起動 / フォーカス中の会話を別アカウントで続ける（claude-accounts のピッカー）
@@ -18,7 +19,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { terminals, agents, theme, run, exec, checking, nextCommand, focused, notify } from "herdr";
+import { terminals, agents, theme, run, exec, checking, nextCommand, focused, notify, home, readTextFile } from "herdr";
 
 const TTL = 6 * 3600; // herdr-wait と同じ。消し忘れても居座らない
 
@@ -34,6 +35,11 @@ export default class HerdrEnvMarks extends View {
   init(_props, cx) {
     this.dead = new Set(); // 待っていたプロセスが終わった PID
     if (checking()) return;
+    // 利用量をほかで出しているか（下部のステータスバーの mod があるか）
+    cx.spawn(async (cx) => {
+      try { await readTextFile(`${home()}/.config/herdr-app/mods/workspace-status-env/mod.json`); this.usageElsewhere = true; } catch { this.usageElsewhere = false; }
+      cx.notify();
+    });
     // 経過時間の表示と、--pid の印の生死を1分ごとに見直す
     cx.timer.every(60000, (cx) => this.checkPids(cx));
     cx.spawn(async (cx) => {
@@ -126,7 +132,7 @@ export default class HerdrEnvMarks extends View {
 
   render(_cx) {
     const list = this.marks();
-    const usage = this.usage();
+    const usage = this.usageElsewhere === false ? this.usage() : [];
     if (!list.length && !usage.length) return div();
     const t = theme();
     const now = Date.now() / 1000;
