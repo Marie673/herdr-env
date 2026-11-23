@@ -2,11 +2,17 @@
 
 input=$(cat)
 
-# 最後に届いた入力をアカウント（CLAUDE_CONFIG_DIR）ごとに残す。GUI 下部の利用量バー
-# （herdr-app/mods/workspace-status-env、ai-usage-collect.py）が rate_limits を読む
-_sl_dir="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-env/statusline"
-mkdir -p "$_sl_dir" 2>/dev/null && printf '%s' "$input" > "$_sl_dir/.$$" 2>/dev/null \
-  && mv "$_sl_dir/.$$" "$_sl_dir/$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | sed "s/^\.//").json" 2>/dev/null
+# 最後に届いた入力を、アカウント（CLAUDE_CONFIG_DIR）ごとのフォルダに会話ごとに残す。GUI 下部の
+# 利用量バー（herdr-app/mods/workspace-status-env、ai-usage-collect.py）が rate_limits を読む。
+# rate_limits はその会話が最後に API を呼んだときの値で、手の空いた会話も古い値のまま描き直す
+# （refreshInterval）。アカウントで1つのファイルにすると、最後に描いた会話の値に入れ替わり続けるので、
+# 会話ごとに残して、集める側で一番新しい値を選ぶ
+_sl_sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
+if [ -n "$_sl_sid" ]; then
+  _sl_dir="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-env/statusline/$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | sed "s/^\.//")"
+  mkdir -p "$_sl_dir" 2>/dev/null && printf '%s' "$input" > "$_sl_dir/.$$" 2>/dev/null \
+    && mv "$_sl_dir/.$$" "$_sl_dir/$_sl_sid.json" 2>/dev/null
+fi
 
 # Herdr の GUI で下部の利用量バーを入れているときは、5h / 7d をそちらに任せてここには出さない
 _usage_elsewhere=0

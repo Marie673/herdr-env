@@ -644,6 +644,19 @@ def limits_text(data):
     return "  ".join(out)
 
 
+def limits_resets(data):
+    """lim の枠ごとのリセット時刻（"5h:<epoch> 7d:<epoch>"）。読む側は、同じアカウントの
+    ターミナルのうちどれの値が新しいかを、リセット時刻と残りで決める（描いた時刻では決めない。
+    手の空いた会話も、最後に API を呼んだときの古い値で描き直すため）"""
+    limits = (data or {}).get("rate_limits") or {}
+    out = []
+    for key, short in (("five_hour", "5h"), ("seven_day", "7d")):
+        w = limits.get(key) or {}
+        if isinstance(w.get("used_percentage"), (int, float)) and isinstance(w.get("resets_at"), (int, float)):
+            out.append("%s:%d" % (short, int(w["resets_at"])))
+    return " ".join(out)
+
+
 def gui_hook(term, event, a, data):
     """GUI: このターミナルの会話 ID・アカウント・上限の残りを hc のラベルに載せる。
     herdr-env の mod（herdr-env-marks の残量の欄、agents-env の行）と herdr-shelf / ピッカーが読む"""
@@ -661,6 +674,7 @@ def gui_hook(term, event, a, data):
     lim = limits_text(data) if event == "statusline" else ""
     if lim:
         kv["lim"] = lim
+        kv["lim_rs"] = limits_resets(data)
         kv["lim_at"] = str(int(time.time()))
     if kv:
         gui_label(term, **kv)

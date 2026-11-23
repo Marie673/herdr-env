@@ -389,16 +389,49 @@ def claude_windows(util, now):
     return out
 
 
-def claude_statusline(acc):
-    """statusline.sh が残した最後の入力の rate_limits（5h / 7d だけ。どのアカウントでも数十秒ごとに新しくなる）"""
+STATUSLINE_KEEP = 8 * 86400  # 7d の枠より古い会話の分は消す
+
+
+def window_key(resets_at, remaining):
+    """どちらの値が新しいかの順序。使った量は枠がリセットされるまで減らないので、
+    リセット時刻が遅い枠ほど新しく、同じ枠なら残りが少ない方が新しい。
+    （statusLine の値は会話ごとに最後に API を呼んだときのもので、いつの値かは分からない。
+    描いた時刻やファイルの更新時刻で選ぶと、手の空いた会話の古い値に入れ替わる）"""
+    return (round(resets_at / 3600) if resets_at else 0, -remaining)
+
+
+def claude_statusline(acc, now):
+    """statusline.sh が会話ごとに残した入力の rate_limits から、5h / 7d それぞれ一番新しい値を選ぶ。
+    返すのは {label: window} と、どれかの会話が最後に描いた時刻"""
     name = os.path.basename(acc["cfg_dir"]).lstrip(".")
-    path = os.path.join(STATUSLINE_DIR, f"{name}.json")
-    try:
-        mtime = int(os.path.getmtime(path))
-    except OSError:
-        return {}, None
-    rl = (read_json(path) or {}).get("rate_limits") or {}
-    return rl, mtime
+    best, newest = {}, None
+    for path in glob.glob(os.path.join(STATUSLINE_DIR, name, "*.json")):
+        try:
+            mtime = int(os.path.getmtime(path))
+        except OSError:
+            continue
+        if now - mtime > STATUSLINE_KEEP:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            continue
+        newest = max(newest or 0, mtime)
+        rl = (read_json(path) or {}).get("rate_limits") or {}
+        for key, label in (("five_hour", "5h"), ("seven_day", "7d")):
+            w = rl.get(key)
+            if not isinstance(w, dict) or not isinstance(w.get("used_percentage"), (int, float)):
+                continue
+            reset_at = w.get("resets_at") if isinstance(w.get("resets_at"), (int, float)) else None
+            if reset_at and reset_at <= now:
+                continue
+            item = {"label": label, "remaining": max(0, min(100, round(100 - w["used_percentage"]))),
+                    "resets_at": reset_at, "countdown": fmt_countdown(reset_at, now)}
+            if label not in best or window_key(reset_at, item["remaining"]) > window_key(
+                best[label]["resets_at"], best[label]["remaining"]
+            ):
+                best[label] = item
+    return best, newest
 
 
 def collect_claude(now):
@@ -417,24 +450,16 @@ def collect_claude(now):
             fetched_at = int(fetched_ms / 1000) if isinstance(fetched_ms, (int, float)) else None
         windows = [w for w in claude_windows(util, now) if not (w["resets_at"] and w["resets_at"] <= now)]
 
-        # 5h / 7d はステータスラインの値の方が新しければそちらで上書きする
-        rl, rl_at = claude_statusline(acc)
-        if rl_at and (not fetched_at or rl_at > fetched_at):
-            for key, label in (("five_hour", "5h"), ("seven_day", "7d")):
-                w = rl.get(key)
-                if not isinstance(w, dict) or not isinstance(w.get("used_percentage"), (int, float)):
-                    continue
-                reset_at = w.get("resets_at") if isinstance(w.get("resets_at"), (int, float)) else None
-                if reset_at and reset_at <= now:
-                    continue
-                item = {"label": label, "remaining": max(0, min(100, round(100 - w["used_percentage"]))),
-                        "resets_at": reset_at, "countdown": fmt_countdown(reset_at, now)}
-                old = next((x for x in windows if x["label"] == label), None)
-                if old:
-                    old.update(item)
-                else:
-                    windows.insert(0 if label == "5h" else len([x for x in windows if x["label"] == "5h"]), item)
-            fetched_at = max(fetched_at or 0, rl_at)
+        # 5h / 7d は、API（または .claude.json）の値と会話ごとのステータスラインの値のうち新しい方
+        sl, sl_at = claude_statusline(acc, now)
+        for label, item in sl.items():
+            old = next((x for x in windows if x["label"] == label), None)
+            if not old:
+                windows.insert(0 if label == "5h" else len([x for x in windows if x["label"] == "5h"]), item)
+            elif window_key(item["resets_at"], item["remaining"]) > window_key(old["resets_at"], old["remaining"]):
+                old.update(item)
+        if sl_at:
+            fetched_at = max(fetched_at or 0, sl_at)
 
         acc_low = min((w["remaining"] for w in windows), default=None)
         text = " ".join(f"{w['label']} {w['remaining']}%" for w in windows)

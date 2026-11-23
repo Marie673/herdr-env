@@ -9,7 +9,8 @@
 //
 // その下に、Claude のアカウントごとの上限の残り（5h / 7d）を出す。claude-account が statusLine から
 // 各ターミナルに付けるラベルを読む: herdr-env.acct_id / herdr-env.acct（表示名）/ herdr-env.lim / herdr-env.lim_at。
-// 上限はアカウント単位なので、同じアカウントのターミナルのうち一番新しい値を使う。6時間たった値は出さない。
+// 上限はアカウント単位なので、同じアカウントのターミナルのうち一番新しい値を使う（リセット時刻 herdr-env.lim_rs と
+// 残りで決める）。6時間たった値は出さない。
 // 下部のステータスバーに利用量を出す mod（workspace-status-env）を入れているときは、重ねて出さない。
 //
 // キーの受け口（keys.json から `herdr-env-marks.<command>`）:
@@ -75,14 +76,30 @@ export default class HerdrEnvMarks extends View {
   // アカウントごとの上限の残り
   usage() {
     const now = Date.now() / 1000;
+    // ラベルは会話ごとに、その会話が最後に API を呼んだときの値。手の空いた会話も古い値のまま
+    // 描き直す（lim_at は新しくなる）ので、lim_at では選ばない。使った量はリセットまで減らないので、
+    // 枠ごとに「リセット時刻（herdr-env.lim_rs）が遅い方、同じなら残りが少ない方」を新しい値とする
     const best = new Map();
     for (const t of terminals()) {
       const l = t.labels ?? {};
       const id = l["herdr-env.acct_id"], at = Number(l["herdr-env.lim_at"] || 0);
       if (!id || !l["herdr-env.lim"] || !at || now - at > TTL) continue;
-      if ((best.get(id)?.at ?? 0) < at) best.set(id, { id, name: l["herdr-env.acct"] || id, lim: l["herdr-env.lim"], at });
+      const rs = Object.fromEntries([...String(l["herdr-env.lim_rs"] ?? "").matchAll(/(\S+):(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+      const acc = best.get(id) ?? { id, name: l["herdr-env.acct"] || id, wins: new Map() };
+      best.set(id, acc);
+      for (const m of String(l["herdr-env.lim"]).matchAll(/(\S+)\s+(\d+)%/g)) {
+        const w = { label: m[1], remaining: Number(m[2]), reset: rs[m[1]] ?? 0 };
+        if (w.reset && w.reset <= now) continue;
+        const key = (x) => [Math.round(x.reset / 3600), -x.remaining];
+        const old = acc.wins.get(w.label);
+        const [a1, a2] = key(w), [b1, b2] = old ? key(old) : [-1, 0];
+        if (!old || a1 > b1 || (a1 === b1 && a2 > b2)) acc.wins.set(w.label, w);
+      }
     }
-    return [...best.values()].sort((x, y) => x.name.localeCompare(y.name));
+    return [...best.values()]
+      .map((a) => ({ id: a.id, name: a.name, lim: ["5h", "7d"].filter((k) => a.wins.has(k)).map((k) => `${k} ${a.wins.get(k).remaining}%`).join("  ") }))
+      .filter((a) => a.lim)
+      .sort((x, y) => x.name.localeCompare(y.name));
   }
 
   marks() {
