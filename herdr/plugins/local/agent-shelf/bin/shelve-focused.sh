@@ -1,6 +1,6 @@
 #!/bin/bash
 # フォーカス中のペインの agent を herdr-shelf で棚にしまう
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 pane=$(printf '%s' "${HERDR_PLUGIN_CONTEXT_JSON:-}" | jq -r '.focused_pane_id // empty')
 [ -n "$pane" ] || exit 0
 if out=$(herdr-shelf shelve --pane "$pane" 2>&1); then
