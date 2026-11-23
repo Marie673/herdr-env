@@ -167,7 +167,7 @@ fi
 
 # どのアカウントで動いているかと上限の残りを herdr のサイドバー（$acct）へ（claude-account）。
 # 待たずに切り離す。statusLine の表示を遅らせない
-if [ -n "${HERDR_PANE_ID:-}" ] && [ -x "$HOME/.local/bin/claude-account" ]; then
+if { [ -n "${HERDR_PANE_ID:-}" ] || [ -n "${HC_TERMINAL_ID:-}" ]; } && [ -x "$HOME/.local/bin/claude-account" ]; then
   (printf '%s' "$input" | "$HOME/.local/bin/claude-account" hook statusline >/dev/null 2>&1 &)
 fi
 

@@ -56,6 +56,41 @@ cd "$(ghq list -p Marie673/herdr-env)"
   - **pane-title-sync**: ペイン名/タブ名を Claude の会話タイトルに自動同期し、サイドバー行と画面上のペインを対応づける
   - **pane-id-copy**: 今いるペインの `pane_id` をクリップボードへ入れる（`prefix+shift+c`）。他のペインのエージェントに「このペインを見て」と伝えるときの識別子
 
+## Herdr の GUI（Herdr.app）で使う
+
+Herdr には TUI（`herdr server`）とは別に、GUI の Herdr.app がある。GUI のペインは herdr-core（`hc`）のターミナルで、
+TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` コマンドとは**つながっていない**。
+ペインに `HERDR_ENV` / `HERDR_PANE_ID` も入らない（代わりに `HC_TERMINAL_ID` が入る）。そのため GUI 用に次を足している。
+
+| 機能 | GUI での扱い |
+|---|---|
+| 今やっている操作の表示（`$act`） | 不要。herdr-core が Claude Code の状態と操作を自分で拾う |
+| `herdr-wait` / `gh-ci-wait` の ⏳ 外部待ち、Stop フックの 💬 要返答 | 印を hc のラベル（`herdr-env.wait` / `.since` / `.pid` / `.human`）に載せ、mod `herdr-env-marks` がサイドバー下にカードで出す。印が無いときカードは消える |
+| agents 一覧を選んでいる Space だけにする（agent-view-space） | mod `agents-env`。標準の agents を `herdr-app do mod.clone` で複製し、`herdr-app/agents-env.py` が絞り込みを足す。見出しのフォルダのボタンか `cmd+shift+a` で「この Space / 全部」を切り替える |
+| `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す |
+| Space ごとの agent の状態 | mod `spaces-env`。標準の Spaces 一覧は畳んだときしか状態を出さず、全体は Agents 欄で見る作り。Agents を絞るとほかの Space が見えなくなるので、各行の右端に状態を出す（動作中 = スピナー、要対応 = !、返事待ち = 💬、完了 = 点、外部待ち = ⏳）。`herdr-app/spaces-env.py` が標準の spaces を複製して書き換える |
+| pr-status（worktree の Space に PR の状態） | 同じ `pr_status.py` が、GUI の worktree の Space のターミナルに hc のラベル `herdr-env.pr` / `herdr-env.ci` / `herdr-env.rv` / `herdr-env.pr_at` を付け、mod `spaces-env` が名前の後ろに出す（`#13 競合 CI ✓ CR ✓`、`#959 merged`）。Space の場所は GUI がブランチを出すのと同じく最初のターミナルがいまいるディレクトリで決める。GUI はプラグインのイベントを送らないので、取り直すのは launchd の毎分と `gh-ci-wait` のとき。ラベルは30分で失効する |
+| worktree-setup（初回の .env コピーと依存のインストール） | GUI はプラグインのイベントを送らないので、`herdr-gui` がワークツリーのスペースを開いたあと（素のシェルからの `gwt` も、agent ペインからの移動も）`wt_setup.py run --path` を切り離して呼ぶ。実行中・失敗はそのスペースのターミナルのラベル `herdr-env.setup` で `spaces-env` の行に `⚙ setup` / `✗ setup` と出し、失敗は macOS の通知でも知らせる |
+| wt-audit（終わったワークツリーの片付け） | `herdr-app ls` の GUI のスペースも突き合わせる（id は `gui:<space id>`）。スペースのフォルダと、各ターミナルがいまいるディレクトリのワークツリーに、そのターミナルの agent の状態を結びつけ、working / blocked なら `--auto` で消さない。片付けるときは GUI のスペースも閉じる。通知は TUI が動いていなければ macOS の通知 |
+| 棚（herdr-shelf） | GUI の agent も同じ条件（idle・表示していない・外部待ちでない・会話の記録が24時間更新されていない）でしまう。会話 ID は `claude-account` が付けるラベル `herdr-env.session`（無ければ起動引数の `--resume`）。`cmd+shift+z` でフォーカス中の agent をしまい、`cmd+shift+s` で棚から開き直す（GUI のターミナルから呼べば GUI に、元のスペースか同じフォルダのスペースへタブで開く）。1時間ごとの定期実行（`launchd/herdr-env.herdr-shelf.plist.in`）は TUI と GUI の両方を見る |
+| Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
+| issue-board（main の Space の右に issue / PR 一覧） | mod `issue-board-env` が、対象リポジトリ（TUI と同じ config.json の `repos`）の main の Space に来たら、今のタブの右に `board.sh` を開く。一覧のターミナルは自分に `herdr-env.board=1` のラベルを付ける。閉じるとその Space では自動で開かなくなり、`cmd+shift+i` で戻す。GUI にはペイン幅を変えるコマンドが無いので、幅は半分になる。着手済みの issue / PR の Space へ移るのは `focus-space.sh`（TUI と GUI の両方） |
+| `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
+
+入れ方:
+
+```sh
+herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新したら流し直す
+```
+
+`setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Spaces 欄を `spaces-env`、Agents 欄を `agents-env` に、
+サイドバー下に `herdr-env-marks` を浮かべる）、それに切り替える。複製は Herdr の更新に追従しないので、
+Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すときは `ctrl+shift+l`（レイアウト切り替え）で `main` を選ぶ。
+
+まだ GUI に移していないもの: `herdr-ask` / `herdr-await` / `gwt-tasks`（委譲。いまはシングル agent 運用なので未使用）、
+TUI のローカルプラグインのうち pane-title-sync / pane-id-copy、agent-attention の通知の絞り込み、`$context`（コンテキストの使用量）。
+GUI はタイトルの同期を自前で持ち、ペインの ID も TUI と形が違うので、pane-title-sync と pane-id-copy は要らない見込み。
+
 ## ファイル対応表
 
 | リポジトリ内 | 配置先 |
@@ -63,11 +98,16 @@ cd "$(ghq list -p Marie673/herdr-env)"
 | `herdr/config.toml` | `~/.config/herdr/config.toml`（テーマ名は空。好みのものを入れる） |
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
+| `herdr/bin/herdr-gui.sh` | `~/.config/herdr/bin/herdr-gui.sh` + `~/.local/bin/herdr-gui` へ symlink（GUI 用） |
+| `herdr-app/` | `herdr-app/setup.sh` が `~/.config/herdr-app/` に mod とレイアウトを作る（GUI 用、下の「Herdr の GUI で使う」） |
 | `herdr/bin/gh-ci-wait.sh` | `~/.config/herdr/bin/gh-ci-wait.sh` + `~/.local/bin/gh-ci-wait` へ symlink |
 | `herdr/bin/gwt-tasks.py` | `~/.config/herdr/bin/gwt-tasks.py` + `~/.local/bin/gwt-tasks` へ symlink |
 | `herdr/bin/herdr-ask.sh` | `~/.config/herdr/bin/herdr-ask.sh` + `~/.local/bin/herdr-ask` へ symlink |
 | `herdr/bin/herdr-await.sh` | `~/.config/herdr/bin/herdr-await.sh` + `~/.local/bin/herdr-await` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
+| `herdr/bin/herdr-shelf.py` | `~/.config/herdr/bin/herdr-shelf.py` + `~/.local/bin/herdr-shelf` へ symlink |
+| `herdr/plugins/local/agent-shelf/` | `~/.config/herdr/plugins/local/agent-shelf/`（TUI の `prefix+shift+z` で棚にしまう） |
+| `launchd/herdr-env.herdr-shelf.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-shelf.plist`（1時間ごとに `herdr-shelf shelve --hours 24`） |
 | `herdr/bin/claude-account.py` | `~/.config/herdr/bin/claude-account.py` + `~/.local/bin/claude-account` へ symlink |
 | `claude-accounts/accounts.example` | `~/.config/claude-accounts/accounts`（自分のアカウントに書き換える） |
 | `herdr/plugins/local/claude-accounts/` | `~/.config/herdr/plugins/local/claude-accounts/` |
@@ -315,6 +355,8 @@ Herdr 0.8.2 では config の `agent_panel_scope` は**効かない**（パー�
 定期実行は `./install.sh --launchd` で入る（`local.herdr-env.herdr-pr-status`、テンプレートは `launchd/herdr-env.herdr-pr-status.plist.in`）。
 
 トークンの TTL は30分なので、定期実行が止まれば古い表示は勝手に消える。
+
+GUI（Herdr.app）にも同じ値を出す（`sync --all` と `sync --path` が GUI の Space も対象にする）。GUI 側の仕組みは「Herdr の GUI（Herdr.app）で使う」の表を参照。
 
 #### worktree-setup: ワークツリーを開いたら .env を置いて依存を入れる
 

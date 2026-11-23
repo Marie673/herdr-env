@@ -157,6 +157,8 @@ function _gwt_path() {
 # ワークツリーを用意し、herdr の workspace として開く。
 # 本体リポジトリ(main/master)はブランチ切り替えを禁止しているので、作業は必ずこの入口から始める。
 # herdr の外で実行した場合は、ワークツリーへ cd するだけ。
+# Herdr の GUI（Herdr.app）では herdr-gui がスペースを開く（agent のペインからなら、ターンの終わりに
+# 同じ会話をワークツリーのスペースで --resume して元のペインを閉じる）。
 #
 # 呼んだのが herdr の agent ペイン（main で作業していた Claude Code など）なら、新しい agent は
 # 起動せず、そのペイン自体を新しい workspace へ移す（GUI の「Move to...」と同じ）。会話を
@@ -238,6 +240,18 @@ function gwt() {
     if [[ -z "${worktree}" ]]; then
         echo "gwt: ワークツリーのパスを特定できませんでした: ${branch}" >&2
         return 1
+    fi
+
+    # Herdr の GUI（Herdr.app）。ペインは herdr-core のターミナルで、TUI の herdr コマンドは使えない。
+    # agent のペインから呼んだときは、ターンの終わりに会話ごとワークツリーのスペースへ移す（herdr-gui）。
+    if [[ "${HERDR_ENV:-}" != 1 && -n "${HC_TERMINAL_ID:-}" ]] && command -v herdr-gui > /dev/null 2>&1; then
+        local -a gui_args=("${branch}" "${worktree}")
+        (( start_agent )) || gui_args+=(--no-agent)
+        (( focus )) || gui_args+=(--no-focus)
+        [[ -n "${task}" ]] && gui_args+=(--task "${task}")
+        herdr-gui open "${gui_args[@]}" || return 1
+        cd "${worktree}" || return 1
+        return 0
     fi
 
     if [[ "${HERDR_ENV:-}" != 1 ]]; then

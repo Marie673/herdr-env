@@ -1,0 +1,12 @@
+id = "agent-shelf"
+name = "Agent Shelf"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "フォーカス中の agent のセッションを棚にしまう（herdr-shelf）。開き直しは herdr-shelf restore"
+platforms = ["macos"]
+
+[[actions]]
+id = "shelve"
+title = "このペインの agent を棚にしまう"
+contexts = ["pane", "workspace"]
+command = ["bash", "bin/shelve-focused.sh"]
