@@ -4,7 +4,8 @@
 // ワークツリーの Space でも、本体のリポジトリと同じ一覧になる（git の common dir でまとめる）。
 //
 //   - 一覧: ●（ワークツリーあり） #番号 タイトル、ラベル（GitHub の色）、PR は CI / CR / レビューの状態
-//   - 行を押すと詳細: 本文とコメント（Markdown）、PR は checks。上の ← で一覧に戻る
+//   - 行を押すと詳細: 本文とコメント（Markdown、画像も）、PR は checks。上の ← で一覧に戻る
+//     チェックボックスを押すと本文を書き換え、リアクションを付け外しし、コメントを書ける（GitHub に書き込む）
 //   - issue の「着手」: haiku がブランチ名を提案し、直してから gwt --task で新しい Space の Claude Code に渡す
 //   - PR の「開く」: そのブランチの Space へ移る。無ければ Claude Code つき / シェルだけで開く
 //
@@ -12,7 +13,7 @@
 // パネルが見えていないあいだは取りに行かない。
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, TextView } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, TextView } from "gpui-base";
 import { spaces, panes, focused, exec, run, theme, layout, home, appHome, checking, notify } from "herdr";
 
 const BIN = () => `${home()}/.config/herdr/plugins/local/issue-board/bin`;
@@ -118,8 +119,11 @@ const IMG_RE = /\[!\[([^\]]*)\]\((\S+?)(?:\s+"[^"]*")?\)\]\([^)]*\)|!\[([^\]]*)\
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const attached = (url) => /^https:\/\/(github\.com\/user-attachments\/assets\/|private-user-images\.githubusercontent\.com\/)/.test(url);
 
-// 本文を [{ text } | { img: { alt, url } }] に分ける。コードブロックの中は切らない。
-// 表の中の画像は、表を崩さないよう表では「🖼 alt」にして、表のすぐ後ろに並べる
+// 本文を [{ text } | { img: { alt, url } } | { task: { checked, text, indent, index } }] に分ける。
+// コードブロックの中は切らない。表の中の画像は、表を崩さないよう表では「🖼 alt」にして、表のすぐ後ろに並べる。
+// チェックボックスの行（- [ ] / - [x]）は押せるように別にする。index は本文の中で何番目のチェックボックスか
+const TASK_RE = /^(\s*)(?:[-*+]|\d+[.)])\s+\[([ xX])\]\s?(.*?)\r?$/;
+const FENCE_RE = /^\s*(```|~~~)/;
 function toImg(m) {
   const url = (m[2] ?? m[4] ?? m[5] ?? "").replace(/&amp;/g, "&");
   if (!/^https?:\/\//.test(url)) return null;
@@ -128,12 +132,18 @@ function toImg(m) {
 }
 function segments(md) {
   const out = [], lines = (md || "").split("\n");
-  let buf = [], fence = false, held = [];
+  let buf = [], fence = false, held = [], tasks = 0;
   const flush = () => { const t = buf.join("\n"); if (t.trim()) out.push({ text: t }); buf = []; };
   lines.forEach((line, i) => {
-    const marker = /^\s*(```|~~~)/.test(line);
+    const marker = FENCE_RE.test(line);
     if (marker) fence = !fence;
     if (fence || marker) { buf.push(line); return; }
+    const task = TASK_RE.exec(line);
+    if (task) {
+      flush();
+      out.push({ task: { checked: task[2] !== " ", text: task[3], indent: task[1].replace(/\t/g, "  ").length, index: tasks++ } });
+      return;
+    }
     if (/^\s*\|/.test(line)) {
       buf.push(line.replace(IMG_RE, (...m) => { const img = toImg(m); if (!img) return m[0]; held.push(img); return `🖼 ${img.alt || "画像"}`; }));
       if (!/^\s*\|/.test(lines[i + 1] ?? "") && held.length) { flush(); out.push(...held.map((img) => ({ img }))); held = []; }
@@ -155,6 +165,53 @@ function segments(md) {
   });
   flush();
   return out;
+}
+
+// index 番目のチェックボックスを切り替えた本文。今の状態が was でなければ null（ほかで書き換わった）
+function toggleTask(md, index, was) {
+  const lines = (md || "").split("\n");
+  let fence = false, k = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const marker = FENCE_RE.test(lines[i]);
+    if (marker) fence = !fence;
+    if (fence || marker) continue;
+    const m = TASK_RE.exec(lines[i]);
+    if (!m || k++ !== index) continue;
+    if ((m[2] !== " ") !== was) return null;
+    lines[i] = lines[i].replace(/\[([ xX])\]/, was ? "[ ]" : "[x]");
+    return lines.join("\n");
+  }
+  return null;
+}
+
+// ---- GitHub への読み書き（GraphQL）----
+
+const REACTIONS = [["THUMBS_UP", "👍"], ["THUMBS_DOWN", "👎"], ["LAUGH", "😄"], ["HOORAY", "🎉"], ["CONFUSED", "😕"], ["HEART", "❤️"], ["ROCKET", "🚀"], ["EYES", "👀"]];
+const REACTED = "reactionGroups { content viewerHasReacted reactors { totalCount } }";
+const DETAIL_FIELDS = `id title body bodyHTML url createdAt viewerCanUpdate viewerCanReact author { login }
+  labels(first: 20) { nodes { name color } } ${REACTED}
+  comments(last: 100) { nodes { id body bodyHTML createdAt viewerCanUpdate viewerCanReact author { login } ${REACTED} } }`;
+const DETAIL_QUERY = `query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) {
+  issueOrPullRequest(number: $n) { __typename ... on Issue { ${DETAIL_FIELDS} } ... on PullRequest { ${DETAIL_FIELDS} } } } }`;
+const BODY_QUERY = `query($id: ID!) { node(id: $id) { ... on Issue { body } ... on PullRequest { body } ... on IssueComment { body } } }`;
+const UPDATE = {
+  Issue: "mutation($id: ID!, $body: String!) { updateIssue(input: { id: $id, body: $body }) { issue { id } } }",
+  PullRequest: "mutation($id: ID!, $body: String!) { updatePullRequest(input: { pullRequestId: $id, body: $body }) { pullRequest { id } } }",
+  IssueComment: "mutation($id: ID!, $body: String!) { updateIssueComment(input: { id: $id, body: $body }) { issueComment { id } } }",
+};
+const REACT = (add) => `mutation($id: ID!, $c: ReactionContent!) { ${add ? "addReaction" : "removeReaction"}(input: { subjectId: $id, content: $c }) { subject { id } } }`;
+const COMMENT = "mutation($id: ID!, $body: String!) { addComment(input: { subjectId: $id, body: $body }) { commentEdge { node { id } } } }";
+
+// gh api graphql。owner / repo は gh がリポジトリから埋める（-F の {owner} / {repo}）。文字列は -f でそのまま渡す
+async function gql(root, query, vars = {}) {
+  const args = ["gh", "api", "graphql", "-f", `query=${query}`];
+  for (const [k, v] of Object.entries(vars)) args.push(typeof v === "number" || /^\{(owner|repo)\}$/.test(v) ? "-F" : "-f", `${k}=${v}`);
+  const r = await run_sh(args, root, 30000);
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch {}
+  if (j?.errors?.length) throw new Error(j.errors[0].message);
+  if (r.code !== 0 || !j?.data) throw new Error(lastLine(r.stderr) || "GitHub に問い合わせられませんでした");
+  return j.data;
 }
 
 // 画像の置き場の名前（URL か添付の uuid から）
@@ -187,6 +244,16 @@ export default class IssuesEnv extends View {
     this.branchInput = InputState.new({ placeholder: "ブランチ名" });
     this.branchInput.on("submit", (_e, cx) => this.submitStart(cx));
     this.images = new Map(); // 画像の置き場の名前 -> { state: "loading" | "ok" | "error", file }
+    this.drafts = new Map(); // "<本体のパス>#<番号>" -> 書きかけのコメント
+    this.comment = TextareaState.new({ placeholder: "コメントを書く（Markdown）", rows: 3 });
+    this.comment.set_auto_grow(3, 12);
+    this.comment.on("change", (_e, cx) => {
+      const d = this.current()?.detail;
+      if (!d) return;
+      const had = Boolean(this.drafts.get(d.key)?.trim()), now = this.comment.value();
+      this.drafts.set(d.key, now);
+      if (had !== Boolean(now.trim())) cx.notify();
+    });
     if (checking()) return;
     // 14日使っていない画像を消す（使うたびに touch している）
     exec("/bin/sh", ["-c", 'mkdir -p "$1" && find "$1" -type f -mtime +14 -delete', "issues-env", `${appHome()}/${IMG_DIR}`]).catch(() => {});
@@ -270,44 +337,46 @@ export default class IssuesEnv extends View {
   // ---- 詳細 ----
 
   open(repo, kind, n, cx) {
-    repo.detail = { kind, n, info: null, error: null, start: null, busy: null, note: null };
-    const detail = repo.detail;
+    repo.detail = { kind, n, key: `${repo.root}#${n}`, info: null, error: null, start: null, busy: null, note: null, signed: new Map() };
+    this.picker = null;
+    this.comment.set_value(this.drafts.get(repo.detail.key) ?? "");
     cx.notify();
+    this.fetchDetail(repo, repo.detail, cx);
+  }
+
+  // 本文・コメント・リアクションを取り直す（開いたときと、書き込んだあと）
+  fetchDetail(repo, d, cx) {
     cx.spawn(async (cx) => {
       try {
-        const r = await run_sh(["gh", kind, "view", String(n), "--json", "title,body,author,createdAt,url,labels,comments"], repo.root, 30000);
-        if (r.code !== 0) throw new Error(lastLine(r.stderr) || "取得できませんでした");
-        detail.info = JSON.parse(r.stdout);
-      } catch (e) { detail.error = String(e?.message ?? e); }
+        const data = await gql(repo.root, DETAIL_QUERY, { owner: "{owner}", repo: "{repo}", n: d.n });
+        const node = data.repository?.issueOrPullRequest;
+        if (!node) throw new Error(`#${d.n} が見つかりません`);
+        d.info = { ...node, labels: node.labels?.nodes ?? [], comments: node.comments?.nodes ?? [] };
+        d.error = null;
+        // 非公開の添付の署名つき URL（5分有効）
+        for (const html of [node.bodyHTML, ...d.info.comments.map((c) => c.bodyHTML)])
+          for (const m of (html ?? "").matchAll(/src="(https:\/\/private-user-images\.githubusercontent\.com\/[^"]+)"/g)) {
+            const id = UUID_RE.exec(m[1])?.[0];
+            if (id) d.signed.set(id.toLowerCase(), m[1].replace(/&amp;/g, "&"));
+          }
+      } catch (e) { if (!d.info) d.error = String(e?.message ?? e); }
       cx.notify();
-      if (detail.info) this.loadImages(repo, detail, cx);
+      if (d.info) this.loadImages(d, cx);
     });
   }
 
-  // 本文とコメントの画像を落とす。添付は API の body_html から署名つきの URL を引く
-  async loadImages(repo, d, cx) {
+  // 本文とコメントの画像を落とす
+  async loadImages(d, cx) {
     const urls = [d.info.body, ...(d.info.comments ?? []).map((c) => c.body)]
       .flatMap((b) => segments(b).filter((s) => s.img).map((s) => s.img.url));
-    const todo = [...new Set(urls)].filter((u) => !this.images.has(imageKey(u)));
+    const todo = [...new Set(urls)].filter((u) => !this.images.has(imageKey(u)) || this.images.get(imageKey(u)).state === "error");
     if (!todo.length) return;
     for (const u of todo) this.images.set(imageKey(u), { state: "loading" });
     cx.notify();
-    const signed = new Map();
-    if (todo.some(attached)) {
-      const accept = ["-H", "Accept: application/vnd.github.full+json"];
-      const r = await Promise.all([
-        run_sh(["gh", "api", ...accept, `repos/{owner}/{repo}/issues/${d.n}`, "--jq", ".body_html"], repo.root, 30000),
-        run_sh(["gh", "api", ...accept, "--paginate", `repos/{owner}/{repo}/issues/${d.n}/comments`, "--jq", ".[].body_html"], repo.root, 30000),
-      ]).catch(() => []);
-      for (const res of r) for (const m of (res?.stdout ?? "").matchAll(/src="(https:\/\/private-user-images\.githubusercontent\.com\/[^"]+)"/g)) {
-        const id = UUID_RE.exec(m[1])?.[0];
-        if (id) signed.set(id.toLowerCase(), m[1].replace(/&amp;/g, "&"));
-      }
-    }
     const dir = `${appHome()}/${IMG_DIR}`;
     await Promise.all(todo.map(async (u) => {
       const key = imageKey(u), id = UUID_RE.exec(u)?.[0]?.toLowerCase();
-      const url = attached(u) ? signed.get(id) ?? u : u;
+      const url = attached(u) ? d.signed.get(id) ?? u : u;
       try {
         const r = await exec("/bin/sh", ["-c", FETCH, "issues-env", dir, key, url], { timeout: 40000 });
         const [file, w, h] = r.stdout.trim().split(" ");
@@ -315,6 +384,58 @@ export default class IssuesEnv extends View {
       } catch { this.images.set(key, { state: "error" }); }
       cx.notify();
     }));
+  }
+
+  // ---- 書き込み（チェックボックス・リアクション・コメント）----
+
+  // 書き込みを1つずつ動かす。失敗したら元に戻して理由を出す
+  write(repo, d, fn, undo, cx) {
+    if (d.writing) return;
+    d.writing = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try { await fn(); }
+      catch (e) { undo?.(); notify({ title: "GitHub に書き込めませんでした", body: String(e?.message ?? e), level: "error" }); }
+      finally { d.writing = false; cx.notify(); }
+    });
+  }
+
+  // subject: 本文（d.info）かコメント。__typename が無いのはコメント
+  toggleTask(repo, d, subject, task, cx) {
+    const type = subject.__typename ?? "IssueComment", before = subject.body;
+    const local = toggleTask(before, task.index, task.checked);
+    if (local == null) return;
+    subject.body = local;
+    this.write(repo, d, async () => {
+      // 書き込む直前の本文で切り替える（ほかで書き換わっていれば止める）
+      const fresh = (await gql(repo.root, BODY_QUERY, { id: subject.id })).node?.body ?? "";
+      const next = toggleTask(fresh, task.index, task.checked);
+      if (next == null) { subject.body = fresh; throw new Error("ほかで本文が書き換わっています。今の本文を出し直しました"); }
+      await gql(repo.root, UPDATE[type], { id: subject.id, body: next });
+      subject.body = next;
+    }, () => { if (subject.body === local) subject.body = before; }, cx);
+  }
+
+  react(repo, d, subject, content, cx) {
+    const groups = subject.reactionGroups ?? (subject.reactionGroups = []);
+    let g = groups.find((x) => x.content === content);
+    if (!g) groups.push(g = { content, viewerHasReacted: false, reactors: { totalCount: 0 } });
+    const was = g.viewerHasReacted;
+    const flip = (on) => { g.viewerHasReacted = on; g.reactors.totalCount = Math.max(0, g.reactors.totalCount + (on ? 1 : -1)); };
+    flip(!was);
+    this.picker = null;
+    this.write(repo, d, () => gql(repo.root, REACT(!was), { id: subject.id, c: content }), () => flip(was), cx);
+  }
+
+  postComment(repo, d, cx) {
+    const body = this.comment.value();
+    if (!body.trim() || !d.info?.id) return;
+    this.write(repo, d, async () => {
+      await gql(repo.root, COMMENT, { id: d.info.id, body });
+      this.drafts.delete(d.key);
+      if (this.current()?.detail === d) this.comment.set_value("");
+      this.fetchDetail(repo, d, cx);
+    }, null, cx);
   }
 
   back(repo, cx) { repo.detail = null; cx.notify(); }
@@ -571,11 +692,53 @@ export default class IssuesEnv extends View {
         .hover((s) => s.bg(t.hover)).on_click(open)
         .child(`🖼 ${alt || "画像"}${st?.state === "error" ? "（読み込めません。押すとブラウザで開く）" : "（読み込んでいます…）"}`);
     };
-    const md = (id, text) => {
-      const segs = segments(text);
-      if (!segs.length) return piece(id, "_（本文なし）_");
-      return v_flex().w_full().min_w(0).gap(8).children(segs.map((s, i) => s.img ? pic(`${id}-img-${i}`, s.img) : piece(`${id}-${i}`, s.text)));
+    // チェックボックス。書き換えられる人（viewerCanUpdate）だけ押せる
+    const task = (id, subject, tk) => {
+      const can = subject.viewerCanUpdate && !d.writing;
+      return h_flex().id(id).w_full().min_w(0).gap(7).items_start().pl(tk.indent * 9)
+        .child(div().id(`${id}-box`).mt(3).size(15).flex_none().flex().items_center().justify_center().rounded(4).border_1()
+          .border_color(tk.checked ? t.accent : t.input).bg(tk.checked ? t.accent : t.background)
+          .text_size(11).text_color(t.accent_foreground)
+          .when(can, (el) => el.cursor_pointer().on_click((_e, cx) => this.toggleTask(repo, d, subject, tk, cx)))
+          .child(tk.checked ? "✓" : ""))
+        .child(div().flex_1().min_w(0).when(tk.checked, (el) => el.opacity(0.65)).child(TextView.markdown(`${id}-text`, tk.text || " ").selectable(true)));
     };
+    const md = (id, subject) => {
+      const segs = segments(subject.body);
+      if (!segs.length) return piece(id, "_（本文なし）_");
+      return v_flex().w_full().min_w(0).gap(8).children(segs.map((s, i) =>
+        s.img ? pic(`${id}-img-${i}`, s.img) : s.task ? task(`${id}-task-${i}`, subject, s.task) : piece(`${id}-${i}`, s.text)));
+    };
+    // リアクション。付いているものと、＋で全部から選ぶ
+    const reactions = (id, subject) => {
+      const can = subject.viewerCanReact && !d.writing;
+      const groups = (subject.reactionGroups ?? []).filter((g) => g.reactors?.totalCount > 0);
+      const pill = (content, emoji, g, key) => div().id(key).h(24).px(7).flex().items_center().gap(4).rounded(12).text_size(12)
+        .border_1().border_color(g?.viewerHasReacted ? t.accent : t.border).bg(g?.viewerHasReacted ? t.selected : t.background)
+        .when(can, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.react(repo, d, subject, content, cx)))
+        .child(emoji).when(Boolean(g?.reactors?.totalCount), (el) => el.child(div().text_color(t.muted).child(String(g.reactors.totalCount))));
+      return v_flex().gap(4)
+        .child(h_flex().gap(4).flex_wrap().items_center()
+          .children(groups.map((g) => pill(g.content, REACTIONS.find(([c]) => c === g.content)?.[1] ?? g.content, g, `${id}-${g.content}`)))
+          .when(can, (el) => el.child(div().id(`${id}-add`).h(24).px(7).flex().items_center().rounded(12).text_size(12).cursor_pointer()
+            .border_1().border_color(t.border).text_color(t.muted).hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => { this.picker = this.picker === subject.id ? null : subject.id; cx.notify(); })
+            .child("☺＋"))))
+        .when(this.picker === subject.id && can, (el) => el.child(h_flex().gap(4).flex_wrap()
+          .children(REACTIONS.map(([c, e]) => {
+            const mine = (subject.reactionGroups ?? []).some((g) => g.content === c && g.viewerHasReacted);
+            return pill(c, e, mine ? { viewerHasReacted: true } : null, `${id}-pick-${c}`);
+          }))));
+    };
+    const draft = this.drafts.get(d.key) ?? "";
+    const commentBox = () => v_flex().gap(6).pt(10).border_t(1).border_color(t.border)
+      .child(div().id("comment-box").w_full().px(9).py(6).rounded(7).border_1().border_color(t.input).bg(t.background)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(Textarea.new(this.comment).w_full().text_size(12.5).text_color(t.foreground)))
+      .child(h_flex().gap(6).items_center()
+        .child(this.button(t, "comment-post", d.writing ? "書き込んでいます…" : "コメント", (_e, cx) => this.postComment(repo, d, cx),
+          { primary: true, disabled: d.writing || !draft.trim() }))
+        .child(div().text_size(11).text_color(t.dim).child("GitHub にそのまま書き込みます")));
     return v_flex().id("issues-detail").flex_1().min_h(0).min_w(0).w_full().overflow_y_scrollbar().p(12).gap(10)
       .on_size_change((size, cx) => { if (size.width !== this.detailWidth) { this.detailWidth = size.width; cx.notify(); } })
       .child(div().text_size(15).font_semibold().child(title))
@@ -593,11 +756,14 @@ export default class IssuesEnv extends View {
       .when(Boolean(pr), (el) => { const c = this.checks(t, pr); return c ? el.child(c) : el; })
       .child(div().h(1).flex_none().bg(t.border))
       .child(d.error ? div().text_size(12).text_color(t.ansi1).child(d.error)
-        : d.info ? md(`body-${d.kind}-${d.n}`, info.body)
+        : d.info ? md(`body-${d.kind}-${d.n}`, info)
         : div().text_size(12).text_color(t.dim).child("読み込んでいます…"))
-      .children(comments.map((c, i) => v_flex().gap(4).pt(8).border_t(1).border_color(t.border)
+      .when(Boolean(d.info), (el) => el.child(reactions(`react-${d.n}`, info)))
+      .children(comments.map((c, i) => v_flex().gap(6).pt(8).border_t(1).border_color(t.border)
         .child(div().text_size(11.5).text_color(t.muted).child(`@${c.author?.login ?? "?"} · ${ago(c.createdAt)}`))
-        .child(md(`comment-${d.kind}-${d.n}-${i}`, c.body))));
+        .child(md(`comment-${d.kind}-${d.n}-${i}`, c))
+        .child(reactions(`react-c-${i}`, c))))
+      .when(Boolean(d.info), (el) => el.child(commentBox()));
   }
 
   render(cx) {
