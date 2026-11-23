@@ -11,9 +11,9 @@
 // gh の取得と 30 秒のキャッシュは TUI の issue-board と同じスクリプト（issues.sh / prs.sh --json）を使う。
 // パネルが見えていないあいだは取りに行かない。
 
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextView } from "gpui-base";
-import { spaces, panes, focused, exec, run, theme, layout, home, checking, notify } from "herdr";
+import { spaces, panes, focused, exec, run, theme, layout, home, appHome, checking, notify } from "herdr";
 
 const BIN = () => `${home()}/.config/herdr/plugins/local/issue-board/bin`;
 const PATHS = 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; exec "$@"';
@@ -106,6 +106,73 @@ function prBadges(pr) {
   return out;
 }
 
+// ---- 本文の画像 ----
+// TextView の Markdown は画像を描かないので、本文を画像の所で切り、画像は落としてきたファイルを image() で出す。
+// 非公開リポジトリの添付（github.com/user-attachments/assets/<uuid>）はそのままでは取れないので、
+// API の body_html にある署名つきの URL（5分有効）を uuid で引いて使う。
+// 落としたファイルは <Herdr の設定>/data/issues-env/img/ に置き、14日使わなければ消す。
+
+const IMG_DIR = "data/issues-env/img";
+// [![alt](画像)](リンク) / ![alt](画像) / <img src="画像">
+const IMG_RE = /\[!\[([^\]]*)\]\((\S+?)(?:\s+"[^"]*")?\)\]\([^)]*\)|!\[([^\]]*)\]\((\S+?)(?:\s+"[^"]*")?\)|<img\b[^>]*?\bsrc=["']([^"']+)["'][^>]*>/gi;
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const attached = (url) => /^https:\/\/(github\.com\/user-attachments\/assets\/|private-user-images\.githubusercontent\.com\/)/.test(url);
+
+// 本文を [{ text } | { img: { alt, url } }] に分ける。コードブロックの中は切らない。
+// 表の中の画像は、表を崩さないよう表では「🖼 alt」にして、表のすぐ後ろに並べる
+function toImg(m) {
+  const url = (m[2] ?? m[4] ?? m[5] ?? "").replace(/&amp;/g, "&");
+  if (!/^https?:\/\//.test(url)) return null;
+  const width = Number(/\bwidth=["']?(\d+)/i.exec(m[0])?.[1] ?? 0) || null; // <img width="300">
+  return { alt: m[1] ?? m[3] ?? (/\balt=["']([^"']*)["']/i.exec(m[0])?.[1] ?? ""), url, width };
+}
+function segments(md) {
+  const out = [], lines = (md || "").split("\n");
+  let buf = [], fence = false, held = [];
+  const flush = () => { const t = buf.join("\n"); if (t.trim()) out.push({ text: t }); buf = []; };
+  lines.forEach((line, i) => {
+    const marker = /^\s*(```|~~~)/.test(line);
+    if (marker) fence = !fence;
+    if (fence || marker) { buf.push(line); return; }
+    if (/^\s*\|/.test(line)) {
+      buf.push(line.replace(IMG_RE, (...m) => { const img = toImg(m); if (!img) return m[0]; held.push(img); return `🖼 ${img.alt || "画像"}`; }));
+      if (!/^\s*\|/.test(lines[i + 1] ?? "") && held.length) { flush(); out.push(...held.map((img) => ({ img }))); held = []; }
+      return;
+    }
+    let last = 0;
+    for (const m of line.matchAll(IMG_RE)) {
+      const img = toImg(m);
+      if (!img) continue;
+      const before = line.slice(last, m.index);
+      // 画像だけの箇条書き（"- ![…](…)"）は、記号だけの行を残さない
+      if (before.trim() && !/^\s*([-*+]|\d+\.)\s*$/.test(before)) buf.push(before);
+      flush();
+      out.push({ img });
+      last = m.index + m[0].length;
+    }
+    if (last === 0) buf.push(line);
+    else if (line.slice(last).trim()) buf.push(line.slice(last));
+  });
+  flush();
+  return out;
+}
+
+// 画像の置き場の名前（URL か添付の uuid から）
+function imageKey(url) {
+  const id = attached(url) ? (UUID_RE.exec(url)?.[0] ?? url) : url;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0") + id.length.toString(16);
+}
+
+// 落とす（あれば使い回す）。標準出力に「ファイル名 幅 高さ」を出す（大きさは sips で測る。測れなければ 0 0）
+const FETCH = `cd "$1" || exit 1; key="$2"; url="$3"
+size() { sips -g pixelWidth -g pixelHeight "$1" 2>/dev/null | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print (w?w:0), (h?h:0)}'; }
+for f in "$key".*; do [ -f "$f" ] && [ "\${f##*.}" != part ] && { touch "$f"; echo "$f $(size "$f")"; exit 0; }; done
+ct=$(curl -sfL --max-time 30 --max-filesize 20000000 -o "$key.part" -w '%{content_type}' "$url") || { rm -f "$key.part"; exit 1; }
+case "$ct" in image/png*) e=png ;; image/jpeg*) e=jpg ;; image/gif*) e=gif ;; image/webp*) e=webp ;; image/svg*) e=svg ;; *) rm -f "$key.part"; exit 2 ;; esac
+mv "$key.part" "$key.$e" && echo "$key.$e $(size "$key.$e")"`;
+
 const numberIn = (branch, n) => new RegExp(`(^|[^0-9])${n}($|[^0-9])`).test(branch);
 
 export default class IssuesEnv extends View {
@@ -119,7 +186,10 @@ export default class IssuesEnv extends View {
     this.input.on("change", (_e, cx) => { this.filter = this.input.value(); cx.notify(); });
     this.branchInput = InputState.new({ placeholder: "ブランチ名" });
     this.branchInput.on("submit", (_e, cx) => this.submitStart(cx));
+    this.images = new Map(); // 画像の置き場の名前 -> { state: "loading" | "ok" | "error", file }
     if (checking()) return;
+    // 14日使っていない画像を消す（使うたびに touch している）
+    exec("/bin/sh", ["-c", 'mkdir -p "$1" && find "$1" -type f -mtime +14 -delete', "issues-env", `${appHome()}/${IMG_DIR}`]).catch(() => {});
     cx.timer.every(STALE, (cx) => { const r = this.current(); if (r && shownNow()) { this.load(r.root, false, cx); cx.notify(); } });
   }
 
@@ -210,7 +280,41 @@ export default class IssuesEnv extends View {
         detail.info = JSON.parse(r.stdout);
       } catch (e) { detail.error = String(e?.message ?? e); }
       cx.notify();
+      if (detail.info) this.loadImages(repo, detail, cx);
     });
+  }
+
+  // 本文とコメントの画像を落とす。添付は API の body_html から署名つきの URL を引く
+  async loadImages(repo, d, cx) {
+    const urls = [d.info.body, ...(d.info.comments ?? []).map((c) => c.body)]
+      .flatMap((b) => segments(b).filter((s) => s.img).map((s) => s.img.url));
+    const todo = [...new Set(urls)].filter((u) => !this.images.has(imageKey(u)));
+    if (!todo.length) return;
+    for (const u of todo) this.images.set(imageKey(u), { state: "loading" });
+    cx.notify();
+    const signed = new Map();
+    if (todo.some(attached)) {
+      const accept = ["-H", "Accept: application/vnd.github.full+json"];
+      const r = await Promise.all([
+        run_sh(["gh", "api", ...accept, `repos/{owner}/{repo}/issues/${d.n}`, "--jq", ".body_html"], repo.root, 30000),
+        run_sh(["gh", "api", ...accept, "--paginate", `repos/{owner}/{repo}/issues/${d.n}/comments`, "--jq", ".[].body_html"], repo.root, 30000),
+      ]).catch(() => []);
+      for (const res of r) for (const m of (res?.stdout ?? "").matchAll(/src="(https:\/\/private-user-images\.githubusercontent\.com\/[^"]+)"/g)) {
+        const id = UUID_RE.exec(m[1])?.[0];
+        if (id) signed.set(id.toLowerCase(), m[1].replace(/&amp;/g, "&"));
+      }
+    }
+    const dir = `${appHome()}/${IMG_DIR}`;
+    await Promise.all(todo.map(async (u) => {
+      const key = imageKey(u), id = UUID_RE.exec(u)?.[0]?.toLowerCase();
+      const url = attached(u) ? signed.get(id) ?? u : u;
+      try {
+        const r = await exec("/bin/sh", ["-c", FETCH, "issues-env", dir, key, url], { timeout: 40000 });
+        const [file, w, h] = r.stdout.trim().split(" ");
+        this.images.set(key, r.code === 0 && file ? { state: "ok", file: `${IMG_DIR}/${file}`, w: Number(w) || 0, h: Number(h) || 0 } : { state: "error" });
+      } catch { this.images.set(key, { state: "error" }); }
+      cx.notify();
+    }));
   }
 
   back(repo, cx) { repo.detail = null; cx.notify(); }
@@ -449,8 +553,31 @@ export default class IssuesEnv extends View {
     const labels = info.labels ?? issue?.labels ?? pr?.labels?.nodes ?? [];
     const author = info.author?.login ?? issue?.author?.login ?? pr?.author?.login ?? "";
     const comments = info.comments ?? [];
-    const md = (id, text) => TextView.markdown(id, text || "_（本文なし）_").selectable(true);
-    return v_flex().id("issues-detail").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10)
+    // 幅の広い表やコードがパネルを押し広げないよう、幅をパネルに合わせて横ははみ出させない
+    const piece = (id, text) => div().w_full().min_w(0).overflow_x_hidden().child(TextView.markdown(id, text).selectable(true));
+    // 画像の所で切って並べる。画像は押すとブラウザで開く
+    const pic = (id, { alt, url, width }) => {
+      const st = this.images.get(imageKey(url));
+      const open = () => exec("/usr/bin/open", [url]);
+      const caption = alt && !/^(image|img|screenshot|画像)$/i.test(alt.trim());
+      // GitHub と同じく元の大きさ（<img width> があればそれ）で、パネルより広ければ縮める
+      const avail = Math.max(120, (this.detailWidth ?? 340) - 24);
+      const want = Math.min(width || st?.w || avail, avail);
+      const sized = (el) => st.w && st.h ? el.w(want).h(Math.round(want * st.h / st.w)) : el.w_full();
+      if (st?.state === "ok") return v_flex().id(id).w_full().gap(3).cursor_pointer().on_click(open)
+        .child(sized(image(st.file)))
+        .when(caption, (el) => el.child(div().text_size(11).text_color(t.dim).child(alt)));
+      return div().id(id).px(8).py(6).rounded(6).border_1().border_color(t.border).text_size(12).text_color(t.dim).cursor_pointer()
+        .hover((s) => s.bg(t.hover)).on_click(open)
+        .child(`🖼 ${alt || "画像"}${st?.state === "error" ? "（読み込めません。押すとブラウザで開く）" : "（読み込んでいます…）"}`);
+    };
+    const md = (id, text) => {
+      const segs = segments(text);
+      if (!segs.length) return piece(id, "_（本文なし）_");
+      return v_flex().w_full().min_w(0).gap(8).children(segs.map((s, i) => s.img ? pic(`${id}-img-${i}`, s.img) : piece(`${id}-${i}`, s.text)));
+    };
+    return v_flex().id("issues-detail").flex_1().min_h(0).min_w(0).w_full().overflow_y_scrollbar().p(12).gap(10)
+      .on_size_change((size, cx) => { if (size.width !== this.detailWidth) { this.detailWidth = size.width; cx.notify(); } })
       .child(div().text_size(15).font_semibold().child(title))
       .child(h_flex().gap(5).flex_wrap().items_center()
         .child(div().flex_none().text_size(11.5).text_color(t.ansi6).child(`#${d.n}`))
@@ -488,7 +615,7 @@ export default class IssuesEnv extends View {
           : !cwd ? "フォルダがありません"
           : this.roots.get(cwd) === null ? "git のリポジトリではありません"
           : "読み込んでいます…");
-    return v_flex().id("issues").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
+    return v_flex().id("issues").size_full().min_h(0).min_w(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(d), (el) => el.child(div().id("issues-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => this.back(repo, cx)).child("←")))
