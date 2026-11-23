@@ -74,7 +74,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | wt-audit（終わったワークツリーの片付け） | `herdr-app ls` の GUI のスペースも突き合わせる（id は `gui:<space id>`）。スペースのフォルダと、各ターミナルがいまいるディレクトリのワークツリーに、そのターミナルの agent の状態を結びつけ、working / blocked なら `--auto` で消さない。片付けるときは GUI のスペースも閉じる。通知は TUI が動いていなければ macOS の通知 |
 | 棚（herdr-shelf） | GUI の agent も同じ条件（idle・表示していない・外部待ちでない・会話の記録が24時間更新されていない）でしまう。会話 ID は `claude-account` が付けるラベル `herdr-env.session`（無ければ起動引数の `--resume`）。`cmd+shift+z` でフォーカス中の agent をしまい、`cmd+shift+s` で棚から開き直す（GUI のターミナルから呼べば GUI に、元のスペースか同じフォルダのスペースへタブで開く）。1時間ごとの定期実行（`launchd/herdr-env.herdr-shelf.plist.in`）は TUI と GUI の両方を見る |
 | Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
-| issue-board（main の Space の右に issue / PR 一覧） | mod `issue-board-env` が、対象リポジトリ（TUI と同じ config.json の `repos`）の main の Space に来たら、今のタブの右に `board.sh` を開く。一覧のターミナルは自分に `herdr-env.board=1` のラベルを付ける。閉じるとその Space では自動で開かなくなり、`cmd+shift+i` で戻す。GUI にはペイン幅を変えるコマンドが無いので、幅は半分になる。着手済みの issue / PR の Space へ移るのは `focus-space.sh`（TUI と GUI の両方） |
+| issue-board（issue / PR 一覧） | 右パネル（Files / Changes のスタック）に mod `issues-env` の **Issues** を足す（下記）。タブバーの Issues ボタン（`herdr-app/tabs-env.py` が標準の tabs を複製して足す）か `cmd+shift+i` で出し入れする。TUI の fzf 版をターミナルで開くことはしない（GUI にはペイン幅を変えるコマンドが無く、一覧が画面の半分を取るため） |
 | `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
 | 利用量のバー（任意。TUI の usagebar の代わり） | `setup.sh --usage-bar` で入れる mod `workspace-status-env` が、下部のステータスバーに Claude（アカウントごと）/ Antigravity / Codex / Gemini CLI の残りを出す。クリックで詳細（枠ごとの残りとリセットまでの時間）、⊞ で右のペインに固定。値は `ai-usage-collect.py` が各ツールの手元の記録から集める（下記）。入れているときは `herdr-env-marks` のカードと `statusline.sh` の 5h / 7d は出さない |
 
@@ -97,9 +97,30 @@ herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新�
 
 使っていないツールはバーに出ない。
 
-`setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Spaces 欄を `spaces-env`、Agents 欄を `agents-env` に、
-サイドバー下に `herdr-env-marks` を浮かべる）、それに切り替える。複製は Herdr の更新に追従しないので、
+`setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Spaces 欄を `spaces-env`、Agents 欄を `agents-env`、
+タブバーを `tabs-env` に替え、右パネルに `issues-env` を足し、サイドバー下に `herdr-env-marks` を浮かべる）、それに切り替える。複製は Herdr の更新に追従しないので、
 Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すときは `ctrl+shift+l`（レイアウト切り替え）で `main` を選ぶ。
+
+### Issues パネル（GUI）
+
+今いる Space（フォーカスしているペインのフォルダ）のリポジトリの open な issue / PR を、右パネルに出す。Files と同じく Space を移れば中身も変わり、
+ワークツリーの Space でも本体と同じ一覧になる（git の common dir でまとめる）。ほかのマシンの Space では出さない。TUI の `config.json` の `repos` は見ない。
+
+- 一覧: `●`（ワークツリーあり）`#番号` タイトル、ラベル（GitHub の色）、作成者と更新。PR は TUI と同じ状態のバッジ（`draft` `競合` `CI✗2` `CR✓` `要修正` `未解決1` `承認`）。上の Issues / PRs で切り替え、入力欄で番号・タイトル・ラベル・作成者を絞り込む。↻ で取り直す
+- 詳細（行を押す）: 本文とコメントを Markdown で出す。PR は checks（失敗・実行中が上、押すとそのページ）も出す。← で一覧に戻る
+- 書き込み（GitHub にそのまま書く）: 本文とコメントのチェックボックスを押すと切り替える（書き込む直前の本文で切り替え、ほかで書き換わっていれば止める。書き換えられる人だけ押せる）。
+  本文とコメントの下でリアクションを付け外しする（☺＋で8種類から選ぶ）。いちばん下の欄からコメントを書く（書きかけは issue / PR ごとに覚えておく）。
+  PR では「承認」「変更を依頼」もできる（コメント欄の文がレビューの本文。変更の依頼は本文が要る。押し間違えないよう2回押しで送る。自分の PR には出さない）。
+  レビュー（承認・変更の依頼・本文のあるコメント）はコメントと時刻順に並べ、状態を色で出す。
+  失敗したら元に戻して通知で理由を出す。読み書きは GraphQL 1回ずつ（`gh api graphql`）
+- 画像: GUI の Markdown 表示は画像を描かないので、本文を画像の所で切り、画像は落としてきて出す（元の大きさ、`<img width>` があればそれ。パネルより広ければ縮める。押すとブラウザで開く）。
+  非公開リポジトリの添付（`github.com/user-attachments/assets/…`）は API の `body_html` にある署名つきの URL で取る。表の中の画像は、表では「🖼 説明」にして表のすぐ後ろに並べる。
+  落とした画像は `~/.config/herdr-app/data/issues-env/img/` に置き、14日使わなければ消す
+- issue の「着手」: haiku がブランチ名を提案し（TUI と同じ `suggest-branch.sh`）、入力欄で直して「着手」で `gwt <branch> --task` する。番号入りのワークツリーがあれば「Space へ移る」（Space が無ければ「Space を開く」）
+- PR: そのブランチの Space へ移る。無ければ「Claude Code で開く / シェルで開く」（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）
+- データは TUI と同じ `issues.sh` / `prs.sh` の `--json`（gh の結果は TUI の一覧と共有して30秒使い回す）。パネルが見えている間だけ1分ごとに取り直す
+- `gwt` はシェル関数なので `zsh -lic` で呼ぶ。ターミナルの外から呼ぶので `HERDR_GUI=1` を付け、`herdr-gui open` がスペースを開く（会話を移す予約はしない）。
+  `~/.zshrc` に gwt を直に書き写している場合は、GUI の分かれ目の条件に `|| "${HERDR_GUI:-}" == 1` を足す（足していないと「gwt がスペースを開きませんでした」と出る）
 
 まだ GUI に移していないもの: `herdr-ask` / `herdr-await` / `gwt-tasks`（委譲。いまはシングル agent 運用なので未使用）、
 TUI のローカルプラグインのうち pane-title-sync / pane-id-copy、agent-attention の通知の絞り込み、`$context`（コンテキストの使用量）。
@@ -404,6 +425,8 @@ done
 space が閉じたとき・ワークツリーが消えたとき（`workspace.closed` / `worktree.removed`）は `gwt-tasks prune` を走らせて、agent もワークツリーも無くなった依頼を台帳から外す。
 
 #### issue-board: main の space の右に issue / PR 一覧を出す
+
+（TUI 用。GUI では右パネルの Issues を使う。上の「Issues パネル（GUI）」）
 
 `config.json` に書いたリポジトリの **main の space** だけ、今のタブの右（幅34%）に GitHub の open な issue を fzf で出す。`^t` で open な PR の一覧（作成の新しい順）に切り替わる。ワークツリーの space には出さない。`workspace.focused` / `tab.focused` / `tab.created` で、そのタブに一覧が無ければ開く。
 

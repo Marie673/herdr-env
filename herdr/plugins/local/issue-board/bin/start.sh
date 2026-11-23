@@ -15,20 +15,6 @@ info=$(gh issue view "$n" --json title,labels 2>/dev/null)
 title=$(printf '%s' "$info" | jq -r '.title // ""')
 labels=$(printf '%s' "$info" | jq -r '[.labels[]?.name] | join(", ")')
 
-# タイトルからブランチ名を作る。hooks やリポジトリの設定を読ませないよう、ユーザー設定を外して中立な場所から呼ぶ
-suggest_branch() {
-  local claude out
-  claude=$(PATH="$HOME/.local/bin:$PATH" command -v claude) || return 1
-  out=$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "GitHub issue のタイトルから git のブランチ名を1つだけ作って、その1行だけを出力して。説明や記号は付けない。
-形式: <type>/<english-kebab-slug>
-- type は feat / fix / docs / refactor / chore / test のどれか（不具合やセキュリティの修正は fix、方針決めや調査のまとめは docs）
-- slug は何をする変更か一目で分かる英語2〜5語。全体で40文字以内。小文字・数字・ハイフンのみ
-タイトル: $title
-ラベル: $labels" | timeout 30 "$claude" -p --setting-sources project --model haiku --no-session-persistence 2>/dev/null) || return 1
-  out=$(printf '%s' "$out" | tr -d '`\r' | grep -E '^(feat|fix|docs|refactor|chore|test)/[a-z0-9-]+$' | head -1)
-  [ -n "$out" ] || return 1
-  printf '%s-%s' "${out%-}" "$n"
-}
 clear
 printf '\033[36m#%s\033[0m %s\n\n' "$n" "$title"
 
@@ -48,7 +34,7 @@ if [ -n "$existing" ]; then
 fi
 
 printf 'ブランチ名を考えています…'
-suggested=$(suggest_branch) || suggested="issue-$n"
+suggested=$("$(dirname "$0")/suggest-branch.sh" "$n" "$title" "$labels") || suggested="issue-$n"
 printf '\r\033[K新しい space の Claude Code にこの issue を渡します。ブランチ名（= space 名）を確認してください。\n'
 printf '\033[90mEnter で決定 / 空にして Enter でやめる\033[0m\n'
 while :; do

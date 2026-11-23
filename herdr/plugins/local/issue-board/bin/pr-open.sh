@@ -8,7 +8,7 @@ root="${ISSUE_BOARD_REPO_ROOT:?}"
 cd "$root" || exit 1
 pause() { printf '\n%s' "${1:-Enter で一覧に戻ります}"; read -r _; }
 
-pr=$("$dir/prs.sh" --json | jq -c --argjson n "$n" '.[] | select(.number == $n)')
+pr=$("$dir/prs.sh" --json --cached | jq -c --argjson n "$n" '.[] | select(.number == $n)')
 [ -n "$pr" ] || { pause "PR #$n が一覧に見つかりません。^r で取り直してください"; exit 0; }
 branch=$(printf '%s' "$pr" | jq -r .headRefName)
 title=$(printf '%s' "$pr" | jq -r .title)
