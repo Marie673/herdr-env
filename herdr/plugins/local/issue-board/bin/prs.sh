@@ -1,8 +1,10 @@
 #!/bin/bash
 # open な PR の一覧を fzf の行にして出す。1行 = "<番号>\t<表示>"
-#   prs.sh [--fresh]   キャッシュ（リポジトリごと・全一覧で共有、30秒）を使わず gh を引き直す
+#   prs.sh [--fresh] [--json] [--cached]
+#     --fresh   キャッシュ（リポジトリごと・全一覧で共有、30秒）を使わず gh を引き直す
+#     --json    キャッシュの JSON をそのまま出す（pr-preview.sh / pr-open.sh / GUI のパネル issues-env 用）
+#     --cached  古くても gh を呼ばない（pr-preview.sh / pr-open.sh は一覧と同じ中身を見たいので付ける）
 # 並びは作成の新しい順（番号の大きい順）
-#   prs.sh --json      キャッシュの JSON をそのまま出す（pr-preview.sh / pr-open.sh 用）
 # 表示: ●（ワークツリーあり） #番号 状態（draft 競合 CI CR 要修正/未解決/承認） ラベル（GitHub の色） タイトル @作成者
 set -u
 root="${ISSUE_BOARD_REPO_ROOT:-$PWD}"
@@ -30,15 +32,26 @@ query($owner: String!, $repo: String!) {
 }
 GQL
 
+fresh=0 json=0 cached=0
+for a in "$@"; do
+  case "$a" in --fresh) fresh=1 ;; --json) json=1 ;; --cached) cached=1 ;; esac
+done
+
 age=999999
 [ -f "$cache" ] && age=$(( $(date +%s) - $(stat -f %m "$cache") ))
-if [ "${1:-}" = --fresh ] || { [ "$age" -gt 30 ] && [ "${1:-}" != --json ]; }; then
-  if out=$(cd "$root" && gh api graphql -F owner='{owner}' -F repo='{repo}' -f query="$QUERY" 2>/dev/null); then
+if [ "$fresh" = 1 ] || { [ "$age" -gt 30 ] && [ "$cached" = 0 ]; }; then
+  if out=$(cd "$root" && gh api graphql -F owner='{owner}' -F repo='{repo}' -f query="$QUERY" 2>"$cache.err"); then
     printf '%s' "$out" | jq '.data.repository.pullRequests.nodes' > "$cache.tmp" && mv "$cache.tmp" "$cache"
+  else
+    err=$(head -c 500 "$cache.err")
   fi
+  rm -f "$cache.err"
 fi
-if [ "${1:-}" = --json ]; then
-  cat "$cache" 2>/dev/null || echo '[]'
+if [ "$json" = 1 ]; then
+  if [ -f "$cache" ]; then cat "$cache"
+  elif [ "$cached" = 1 ]; then echo '[]'
+  else printf '%s\n' "${err:-PR を取得できません（gh auth status を確認）}" >&2; exit 1
+  fi
   exit 0
 fi
 if [ ! -f "$cache" ]; then

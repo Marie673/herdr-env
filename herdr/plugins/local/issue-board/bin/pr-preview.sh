@@ -3,7 +3,7 @@
 dir="$(cd "$(dirname "$0")" && pwd)"
 n="${1:-}"
 case "$n" in ''|*[!0-9]*) exit 0 ;; esac
-"$dir/prs.sh" --json | jq -r --argjson n "$n" '
+"$dir/prs.sh" --json --cached | jq -r --argjson n "$n" '
   def cls:
     if .__typename == "CheckRun" then
       if .status != "COMPLETED" then "pending"

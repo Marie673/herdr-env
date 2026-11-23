@@ -244,7 +244,8 @@ function gwt() {
 
     # Herdr の GUI（Herdr.app）。ペインは herdr-core のターミナルで、TUI の herdr コマンドは使えない。
     # agent のペインから呼んだときは、ターンの終わりに会話ごとワークツリーのスペースへ移す（herdr-gui）。
-    if [[ "${HERDR_ENV:-}" != 1 && -n "${HC_TERMINAL_ID:-}" ]] && command -v herdr-gui > /dev/null 2>&1; then
+    # GUI の mod（issue 一覧のパネル issues-env）はターミナルを持たないので、HERDR_GUI=1 を付けて呼ぶ。
+    if [[ "${HERDR_ENV:-}" != 1 && ( -n "${HC_TERMINAL_ID:-}" || "${HERDR_GUI:-}" == 1 ) ]] && command -v herdr-gui > /dev/null 2>&1; then
         local -a gui_args=("${branch}" "${worktree}")
         (( start_agent )) || gui_args+=(--no-agent)
         (( focus )) || gui_args+=(--no-focus)

@@ -7,7 +7,9 @@
 # 使い方:
 #   herdr-gui active                    … GUI のターミナルの中なら終了コード0
 #   herdr-gui open <branch> <worktree> [--no-agent] [--no-focus] [--task <文>]
-#                                       … ワークツリーをスペースとして開く（gwt が呼ぶ）
+#                                       … ワークツリーをスペースとして開く（gwt が呼ぶ）。
+#                                         GUI の mod（issues-env）のようにターミナルの外から呼ぶときは
+#                                         HERDR_GUI=1 を付ける（会話を移す予約はせず、常にスペースを開く）
 #   herdr-gui move-on-stop              … Stop フックの入力を標準入力で受け、移動の予約があれば実行する
 #                                         （HERDR_GUI_ASKED=1 なら移った先で続きを促さない）
 #   herdr-gui cancel                    … このターミナルの移動の予約を取り消す
@@ -32,6 +34,11 @@ active() {
   [ -n "${HC_TERMINAL_ID:-}" ] && [ "${HERDR_ENV:-}" != 1 ] && command -v hc >/dev/null 2>&1
 }
 
+# GUI のターミナルの中か、GUI の mod から HERDR_GUI=1 で呼ばれたか（open だけが受け付ける）
+gui() {
+  active || { [ "${HERDR_GUI:-}" = 1 ] && command -v herdr-app >/dev/null 2>&1; }
+}
+
 # ワークツリーのフォルダを開いているスペースの id（無ければ空）
 space_for() {
   herdr-app ls 2>/dev/null | jq -r --arg f "$1" '[.spaces[] | select(.folder == $f and (.machine == null))][0].id // empty'
@@ -39,6 +46,7 @@ space_for() {
 
 # このターミナルで動いているのが agent（Claude Code）か
 self_is_agent() {
+  [ -n "${HC_TERMINAL_ID:-}" ] || return 1
   hc get "$HC_TERMINAL_ID" 2>/dev/null | jq -e '
     (.status.app // "") == "claude-code"
     or ((.foreground.argv[0] // "") | split("/") | last) == "claude"' >/dev/null 2>&1
@@ -97,7 +105,7 @@ cmd_open() {
     esac
   done
   [ -n "$branch" ] && [ -n "$worktree" ] || die "usage: herdr-gui open <branch> <worktree> [--no-agent] [--no-focus] [--task <文>]"
-  active || die "Herdr の GUI のターミナルではありません"
+  gui || die "Herdr の GUI のターミナルではありません"
 
   # agent のペインから呼ばれたら、会話ごと移す予約をして終わる
   if [ "$start_agent" = 1 ] && [ -z "$task" ] && self_is_agent; then

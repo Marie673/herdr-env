@@ -9,8 +9,6 @@ export BOARD_ID="${HERDR_PANE_ID:-$$}"   # モード（issue / pr）をペイン
 export FZF_DEFAULT_COMMAND="$dir/list.sh"
 cd "$ISSUE_BOARD_REPO_ROOT" || exit 1
 printf '\033]0;Issues\007'
-# GUI（Herdr.app）では、一覧のターミナルに印を付けておく（mod の issue-board-env がタブに一覧があるかをこれで見る）
-[ -n "${HC_TERMINAL_ID:-}" ] && command -v hc >/dev/null 2>&1 && hc label "$HC_TERMINAL_ID" herdr-env.board=1 >/dev/null 2>&1
 "$dir/mode.sh" reset
 # ペインが閉じたら（SIGHUP）fzf と更新ループも一緒に止める
 trap 'trap - EXIT HUP TERM; "$dir/mode.sh" reset; kill 0 2>/dev/null' EXIT HUP TERM
