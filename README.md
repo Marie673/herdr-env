@@ -76,12 +76,26 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
 | issue-board（main の Space の右に issue / PR 一覧） | mod `issue-board-env` が、対象リポジトリ（TUI と同じ config.json の `repos`）の main の Space に来たら、今のタブの右に `board.sh` を開く。一覧のターミナルは自分に `herdr-env.board=1` のラベルを付ける。閉じるとその Space では自動で開かなくなり、`cmd+shift+i` で戻す。GUI にはペイン幅を変えるコマンドが無いので、幅は半分になる。着手済みの issue / PR の Space へ移るのは `focus-space.sh`（TUI と GUI の両方） |
 | `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
+| 利用量のバー（任意。TUI の usagebar の代わり） | `setup.sh --usage-bar` で入れる mod `workspace-status-env` が、下部のステータスバーに Claude（アカウントごと）/ Antigravity / Codex / Gemini CLI の残りを出す。クリックで詳細（枠ごとの残りとリセットまでの時間）、⊞ で右のペインに固定。値は `ai-usage-collect.py` が各ツールの手元の記録から集める（下記）。入れているときは `herdr-env-marks` のカードと `statusline.sh` の 5h / 7d は出さない |
 
 入れ方:
 
 ```sh
 herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新したら流し直す
 ```
+
+利用量のバーも出すときは `herdr-app/setup.sh --usage-bar`（一度入れれば、以後は付けずに流しても入れ直す。やめるときは `--no-usage-bar`）。
+`ai-usage-collect.py` が読むもの:
+
+- Claude: `claude/statusline.sh` が残す statusLine の入力（`~/.local/state/herdr-env/statusline/<アカウント>.json` の `rate_limits`）と、
+  Claude Code が `.claude.json` に持つ `cachedUsageUtilization`。アカウントは `~/.config/claude-accounts/accounts`（無ければ `~/.claude` だけ）。
+  モデル別の週の枠まで新しい値で出したいときは `~/.config/herdr-env/usage.json` に `{"claude_usage_api": true}` を書く。
+  Keychain にある Claude Code のトークンで `/usage` と同じ API（公開されていない）を5分に1回まで呼ぶので、既定では切ってある
+- Codex: `~/.codex/sessions/` の記録の `rate_limits`
+- Antigravity: statusLine のスクリプトから JSON を渡す（`printf '%s' "$input" | ~/.config/herdr/bin/ai-usage-collect.py --record-agy`）
+- Gemini CLI: 今日の `~/.gemini/tmp/*/chats/` のトークン数。AfterAgent フックで `ai-usage-collect.py --record-gemini` を呼ぶと最終更新の時刻も出る
+
+使っていないツールはバーに出ない。
 
 `setup.sh` は標準の `main` レイアウトを複製して `herdr-env` レイアウトを作り（Spaces 欄を `spaces-env`、Agents 欄を `agents-env` に、
 サイドバー下に `herdr-env-marks` を浮かべる）、それに切り替える。複製は Herdr の更新に追従しないので、
@@ -99,6 +113,7 @@ GUI はタイトルの同期を自前で持ち、ペインの ID も TUI と形�
 | `herdr/bin/new-workspace-picker.sh` | `~/.config/herdr/bin/new-workspace-picker.sh` |
 | `herdr/bin/herdr-wait.sh` | `~/.config/herdr/bin/herdr-wait.sh` + `~/.local/bin/herdr-wait` へ symlink |
 | `herdr/bin/herdr-gui.sh` | `~/.config/herdr/bin/herdr-gui.sh` + `~/.local/bin/herdr-gui` へ symlink（GUI 用） |
+| `herdr/bin/ai-usage-collect.py` | `~/.config/herdr/bin/ai-usage-collect.py`（GUI の利用量のバーが呼ぶ） |
 | `herdr-app/` | `herdr-app/setup.sh` が `~/.config/herdr-app/` に mod とレイアウトを作る（GUI 用、下の「Herdr の GUI で使う」） |
 | `herdr/bin/gh-ci-wait.sh` | `~/.config/herdr/bin/gh-ci-wait.sh` + `~/.local/bin/gh-ci-wait` へ symlink |
 | `herdr/bin/gwt-tasks.py` | `~/.config/herdr/bin/gwt-tasks.py` + `~/.local/bin/gwt-tasks` へ symlink |

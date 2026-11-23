@@ -2,6 +2,16 @@
 
 input=$(cat)
 
+# 最後に届いた入力をアカウント（CLAUDE_CONFIG_DIR）ごとに残す。GUI 下部の利用量バー
+# （herdr-app/mods/workspace-status-env、ai-usage-collect.py）が rate_limits を読む
+_sl_dir="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-env/statusline"
+mkdir -p "$_sl_dir" 2>/dev/null && printf '%s' "$input" > "$_sl_dir/.$$" 2>/dev/null \
+  && mv "$_sl_dir/.$$" "$_sl_dir/$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | sed "s/^\.//").json" 2>/dev/null
+
+# Herdr の GUI で下部の利用量バーを入れているときは、5h / 7d をそちらに任せてここには出さない
+_usage_elsewhere=0
+[ -n "${HC_TERMINAL_ID:-}" ] && [ -f "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/workspace-status-env/mod.json" ] && _usage_elsewhere=1
+
 format_bar() {
   local remaining="$1"
   local filled i bar
@@ -137,8 +147,12 @@ if [ -n "$model_name" ]; then
   parts+=("$model_part")
 fi
 ctx=$(format_context "$ctx_used_pct" "$ctx_tokens_used" "$ctx_window_size")
-five=$(format_window '5h' "$five_used" "$five_reset")
-week=$(format_window '7d' "$week_used" "$week_reset")
+five=""
+week=""
+if [ "$_usage_elsewhere" = 0 ]; then
+  five=$(format_window '5h' "$five_used" "$five_reset")
+  week=$(format_window '7d' "$week_used" "$week_reset")
+fi
 [ -n "$ctx" ] && parts+=("$ctx")
 [ -n "$five" ] && parts+=("$five")
 [ -n "$week" ] && parts+=("$week")

@@ -6,6 +6,9 @@
 #   - mods/spaces-env      : 各行の右端にその Space の agent の状態を出す Spaces 一覧（spaces-env.py が標準の spaces から作る）
 #   - layouts/herdr-env    : 標準の main を複製し、Spaces / Agents 欄を差し替え、サイドバー下にカードを浮かべたもの
 #   - mods/issue-board-env : issue-board（TUI のプラグイン）の GUI 版の入口。対象リポジトリの main の Space で一覧を右に開く
+#   - mods/workspace-status-env : （--usage-bar のときだけ）下部のステータスバーに Claude / Antigravity / Codex / Gemini の
+#                            利用量を出す。データは ~/.config/herdr/bin/ai-usage-collect.py（install.sh が置く）。
+#                            一度入れたら、以後 --usage-bar なしで流しても入れ直す（やめるときは --no-usage-bar）
 #   - keys.json            : cmd+shift+a で agents の範囲（この Space / 全部）、cmd+shift+i で issue 一覧の表示を切り替える。
 #                            cmd+shift+u で Claude のアカウントを選ぶ（起動 / この会話を別アカウントで続ける）、
 #                            cmd+shift+z でこの agent を棚にしまう、cmd+shift+s で棚から開き直す
@@ -13,14 +16,26 @@
 #
 # 標準の main / agents は Herdr の更新で変わるが、複製は追従しない。Herdr を更新したらもう一度流す。
 #
-#   herdr-app/setup.sh            入れて herdr-env レイアウトに切り替える
-#   herdr-app/setup.sh --no-switch 入れるだけ
+#   herdr-app/setup.sh               入れて herdr-env レイアウトに切り替える
+#   herdr-app/setup.sh --no-switch   入れるだけ
+#   herdr-app/setup.sh --usage-bar   下部のステータスバーに利用量を出す（--no-usage-bar でやめる）
 set -eu
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 HOME_DIR="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 SWITCH=1
-[ "${1:-}" = "--no-switch" ] && SWITCH=0
+USAGE=""   # 空なら、前に入れていればそのまま入れ直す
+for a in "$@"; do
+  case "$a" in
+    --no-switch) SWITCH=0 ;;
+    --usage-bar) USAGE=1 ;;
+    --no-usage-bar) USAGE=0 ;;
+    *) echo "不明なオプション: $a" >&2; exit 2 ;;
+  esac
+done
+if [ -z "$USAGE" ]; then
+  if [ -f "$HOME_DIR/mods/workspace-status-env/mod.json" ]; then USAGE=1; else USAGE=0; fi
+fi
 
 command -v herdr-app >/dev/null 2>&1 || { echo "herdr-app が見つかりません（Herdr.app を入れて一度起動してください）" >&2; exit 1; }
 [ -d "$HOME_DIR" ] || { echo "$HOME_DIR がありません（Herdr.app を一度起動してください）" >&2; exit 1; }
@@ -43,6 +58,15 @@ herdr-app check "$HOME_DIR/mods/agents-env"
 python3 "$SRC/spaces-env.py" --home "$HOME_DIR"
 herdr-app check "$HOME_DIR/mods/spaces-env"
 
+# 2c. 下部のステータスバーに利用量を出す（入れるときだけ）
+if [ "$USAGE" = 1 ]; then
+  mkdir -p "$HOME_DIR/mods/workspace-status-env"
+  cp "$SRC/mods/workspace-status-env/"* "$HOME_DIR/mods/workspace-status-env/"
+  herdr-app check "$HOME_DIR/mods/workspace-status-env"
+else
+  rm -rf "$HOME_DIR/mods/workspace-status-env"
+fi
+
 # 3. レイアウト（main から作り直す）
 L="$HOME_DIR/layouts/herdr-env.json"
 [ -f "$L" ] && mv "$L" "$L.bak.$(date +%Y%m%d%H%M%S)"
@@ -51,18 +75,23 @@ jq '
   def fix: if type == "object" then
       (if .id == "agents" and .content.mod == "agents" then .content.mod = "agents-env" else . end)
       | (if .id == "spaces" and .content.mod == "spaces" then .content.mod = "spaces-env" else . end)
+      | (if $usage and .content.mod? == "workspace-status" then .content.mod = "workspace-status-env" else . end)
       | (if .id == "sidebar-lists" then .floating = ((.floating // []) | map(select(.id != "herdr-env-marks" and .id != "issue-board-env"))
            + [{id: "herdr-env-marks", content: {mod: "herdr-env-marks"}, edge: "bottom", align: "center"},
               {id: "issue-board-env", content: {mod: "issue-board-env"}, edge: "top", align: "end"}]) else . end)
       | (if has("children") then .children |= map(fix) else . end)
     else . end;
-  fix' "$L" > "$L.tmp" && mv "$L.tmp" "$L"
+  fix' --argjson usage "$([ "$USAGE" = 1 ] && echo true || echo false)" "$L" > "$L.tmp" && mv "$L.tmp" "$L"
 jq -e '[.. | objects | select(.content.mod? == "agents-env")] | length == 1' "$L" >/dev/null \
   || echo "  ! main の Agents 欄が見つからず、agents-env に差し替えられませんでした" >&2
 jq -e '[.. | objects | select(.content.mod? == "spaces-env")] | length == 1' "$L" >/dev/null \
   || echo "  ! main の Spaces 欄が見つからず、spaces-env に差し替えられませんでした" >&2
 jq -e '[.. | objects | select(.id? == "herdr-env-marks")] | length == 1' "$L" >/dev/null \
   || echo "  ! main に sidebar-lists が無く、印のカードを置けませんでした" >&2
+if [ "$USAGE" = 1 ]; then
+  jq -e '[.. | objects | select(.content.mod? == "workspace-status-env")] | length == 1' "$L" >/dev/null \
+    || echo "  ! main に下部のステータスバー（workspace-status）が無く、利用量のバーに差し替えられませんでした" >&2
+fi
 
 # 4. キー（使っていなければ）
 K="$HOME_DIR/keys.json"
