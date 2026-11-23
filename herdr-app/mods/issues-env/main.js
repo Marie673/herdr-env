@@ -188,17 +188,24 @@ function toggleTask(md, index, was) {
 
 const REACTIONS = [["THUMBS_UP", "👍"], ["THUMBS_DOWN", "👎"], ["LAUGH", "😄"], ["HOORAY", "🎉"], ["CONFUSED", "😕"], ["HEART", "❤️"], ["ROCKET", "🚀"], ["EYES", "👀"]];
 const REACTED = "reactionGroups { content viewerHasReacted reactors { totalCount } }";
+const POST = `__typename id body bodyHTML createdAt viewerCanUpdate viewerCanReact author { login } ${REACTED}`;
 const DETAIL_FIELDS = `id title body bodyHTML url createdAt viewerCanUpdate viewerCanReact author { login }
   labels(first: 20) { nodes { name color } } ${REACTED}
-  comments(last: 100) { nodes { id body bodyHTML createdAt viewerCanUpdate viewerCanReact author { login } ${REACTED} } }`;
-const DETAIL_QUERY = `query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) {
-  issueOrPullRequest(number: $n) { __typename ... on Issue { ${DETAIL_FIELDS} } ... on PullRequest { ${DETAIL_FIELDS} } } } }`;
-const BODY_QUERY = `query($id: ID!) { node(id: $id) { ... on Issue { body } ... on PullRequest { body } ... on IssueComment { body } } }`;
+  comments(last: 100) { nodes { ${POST} } }`;
+// PR はレビュー（承認・変更の依頼・コメント）もコメントと並べて出す
+const DETAIL_QUERY = `query($owner: String!, $repo: String!, $n: Int!) { viewer { login } repository(owner: $owner, name: $repo) {
+  issueOrPullRequest(number: $n) { __typename ... on Issue { ${DETAIL_FIELDS} }
+    ... on PullRequest { ${DETAIL_FIELDS} reviews(last: 50) { nodes { ${POST} state } } } } } }`;
+const BODY_QUERY = `query($id: ID!) { node(id: $id) { ... on Issue { body } ... on PullRequest { body } ... on IssueComment { body } ... on PullRequestReview { body } } }`;
 const UPDATE = {
   Issue: "mutation($id: ID!, $body: String!) { updateIssue(input: { id: $id, body: $body }) { issue { id } } }",
   PullRequest: "mutation($id: ID!, $body: String!) { updatePullRequest(input: { pullRequestId: $id, body: $body }) { pullRequest { id } } }",
   IssueComment: "mutation($id: ID!, $body: String!) { updateIssueComment(input: { id: $id, body: $body }) { issueComment { id } } }",
+  PullRequestReview: "mutation($id: ID!, $body: String!) { updatePullRequestReview(input: { pullRequestReviewId: $id, body: $body }) { pullRequestReview { id } } }",
 };
+// event: APPROVE（承認）/ REQUEST_CHANGES（変更を依頼）/ COMMENT
+const REVIEW = "mutation($id: ID!, $event: PullRequestReviewEvent!, $body: String!) { addPullRequestReview(input: { pullRequestId: $id, event: $event, body: $body }) { pullRequestReview { id state } } }";
+const REVIEW_STATE = { APPROVED: ["承認しました", "good"], CHANGES_REQUESTED: ["変更を依頼しました", "bad"], COMMENTED: ["レビューしました", "dim"], DISMISSED: ["レビュー（取り下げ）", "dim"] };
 const REACT = (add) => `mutation($id: ID!, $c: ReactionContent!) { ${add ? "addReaction" : "removeReaction"}(input: { subjectId: $id, content: $c }) { subject { id } } }`;
 const COMMENT = "mutation($id: ID!, $body: String!) { addComment(input: { subjectId: $id, body: $body }) { commentEdge { node { id } } } }";
 
@@ -351,7 +358,10 @@ export default class IssuesEnv extends View {
         const data = await gql(repo.root, DETAIL_QUERY, { owner: "{owner}", repo: "{repo}", n: d.n });
         const node = data.repository?.issueOrPullRequest;
         if (!node) throw new Error(`#${d.n} が見つかりません`);
-        d.info = { ...node, labels: node.labels?.nodes ?? [], comments: node.comments?.nodes ?? [] };
+        // コメントとレビューを時刻順に。本文の無い「レビューしました」（コードへのコメントだけ）と書きかけは出さない
+        const reviews = (node.reviews?.nodes ?? []).filter((r) => r.state !== "PENDING" && (r.state !== "COMMENTED" || r.body?.trim()));
+        const comments = [...(node.comments?.nodes ?? []), ...reviews].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+        d.info = { ...node, labels: node.labels?.nodes ?? [], comments, viewer: data.viewer?.login ?? "" };
         d.error = null;
         // 非公開の添付の署名つき URL（5分有効）
         for (const html of [node.bodyHTML, ...d.info.comments.map((c) => c.bodyHTML)])
@@ -425,6 +435,27 @@ export default class IssuesEnv extends View {
     flip(!was);
     this.picker = null;
     this.write(repo, d, () => gql(repo.root, REACT(!was), { id: subject.id, c: content }), () => flip(was), cx);
+  }
+
+  // PR のレビュー。承認と変更の依頼は、押し間違えないよう2回押しで送る（5秒で戻る）
+  review(repo, d, event, cx) {
+    const body = this.comment.value();
+    if (!d.info?.id || (event === "REQUEST_CHANGES" && !body.trim())) return;
+    if (d.confirm !== event) {
+      d.confirm = event;
+      cx.timer.after(5000, (cx) => { if (d.confirm === event) { d.confirm = null; cx.notify(); } });
+      cx.notify();
+      return;
+    }
+    d.confirm = null;
+    this.write(repo, d, async () => {
+      await gql(repo.root, REVIEW, { id: d.info.id, event, body });
+      this.drafts.delete(d.key);
+      if (this.current()?.detail === d) this.comment.set_value("");
+      notify({ title: `#${d.n} を${event === "APPROVE" ? "承認しました" : "変更を依頼しました"}`, level: "success" });
+      this.fetchDetail(repo, d, cx);
+      this.load(repo.root, true, cx); // 一覧のバッジ（承認 / 要修正）も取り直す
+    }, null, cx);
   }
 
   postComment(repo, d, cx) {
@@ -735,10 +766,17 @@ export default class IssuesEnv extends View {
       .child(div().id("comment-box").w_full().px(9).py(6).rounded(7).border_1().border_color(t.input).bg(t.background)
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .child(Textarea.new(this.comment).w_full().text_size(12.5).text_color(t.foreground)))
-      .child(h_flex().gap(6).items_center()
+      .child(h_flex().gap(6).items_center().flex_wrap()
         .child(this.button(t, "comment-post", d.writing ? "書き込んでいます…" : "コメント", (_e, cx) => this.postComment(repo, d, cx),
           { primary: true, disabled: d.writing || !draft.trim() }))
-        .child(div().text_size(11).text_color(t.dim).child("GitHub にそのまま書き込みます")));
+        // PR のレビュー。自分の PR は承認も変更の依頼もできない（GitHub の決まり）
+        .when(d.kind === "pr" && Boolean(info.id) && info.viewer !== author, (el) => el
+          .child(this.button(t, "review-approve", d.confirm === "APPROVE" ? "もう一度押すと承認" : "承認",
+            (_e, cx) => this.review(repo, d, "APPROVE", cx), { primary: d.confirm === "APPROVE", disabled: d.writing }))
+          .child(this.button(t, "review-changes", d.confirm === "REQUEST_CHANGES" ? "もう一度押すと変更を依頼" : "変更を依頼",
+            (_e, cx) => this.review(repo, d, "REQUEST_CHANGES", cx), { primary: d.confirm === "REQUEST_CHANGES", disabled: d.writing || !draft.trim() }))))
+      .child(div().text_size(11).text_color(t.dim).child(
+        d.kind === "pr" && info.viewer !== author ? "GitHub にそのまま書き込みます。変更の依頼には本文が要ります。承認では欄の文がレビューの本文になります" : "GitHub にそのまま書き込みます"));
     return v_flex().id("issues-detail").flex_1().min_h(0).min_w(0).w_full().overflow_y_scrollbar().p(12).gap(10)
       .on_size_change((size, cx) => { if (size.width !== this.detailWidth) { this.detailWidth = size.width; cx.notify(); } })
       .child(div().text_size(15).font_semibold().child(title))
@@ -760,8 +798,11 @@ export default class IssuesEnv extends View {
         : div().text_size(12).text_color(t.dim).child("読み込んでいます…"))
       .when(Boolean(d.info), (el) => el.child(reactions(`react-${d.n}`, info)))
       .children(comments.map((c, i) => v_flex().gap(6).pt(8).border_t(1).border_color(t.border)
-        .child(div().text_size(11.5).text_color(t.muted).child(`@${c.author?.login ?? "?"} · ${ago(c.createdAt)}`))
-        .child(md(`comment-${d.kind}-${d.n}-${i}`, c))
+        .child(h_flex().gap(6).items_center().text_size(11.5)
+          .child(div().text_color(t.muted).child(`@${c.author?.login ?? "?"}`))
+          .when(Boolean(c.state && REVIEW_STATE[c.state]), (el) => el.children(this.badges(t, [{ text: REVIEW_STATE[c.state][0], tone: REVIEW_STATE[c.state][1] }])))
+          .child(div().text_color(t.dim).child(ago(c.createdAt))))
+        .when(Boolean(c.body?.trim()) || !c.state, (el) => el.child(md(`comment-${d.kind}-${d.n}-${i}`, c)))
         .child(reactions(`react-c-${i}`, c))))
       .when(Boolean(d.info), (el) => el.child(commentBox()));
   }
