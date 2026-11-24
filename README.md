@@ -562,10 +562,19 @@ herdr plugin link ~/.config/herdr/plugins/local/claude-accounts
 | 今のペインの会話を別アカウントで続ける | `prefix+shift+u` → ctrl-s（`claude-account switch <id>`）。`/exit` して、そのペインのシェルに `CLAUDE_CONFIG_DIR` を入れ、同じ agent 名で `--resume` する |
 | シェルから | `claude -A <id>`、`eval "$(claude-account env <id>)"` |
 
+**既定のアカウント**: `claude` とだけ打ったとき（Herdr.app の＋メニューから起動したときも）のアカウントは、accounts に `@default <id>` と書いて選ぶ（無ければ最初の行）。`~/.claude` のアカウント（最初の行）とは別に決められる。上限に達していれば、次に使えるアカウントで起動する（`claude-account default`）。
+
+**上限での自動切り替え**: 会話が上限で止まると（StopFailure の `rate_limit`）、`claude-account hook stop-failure` が同じ会話のまま次に使えるアカウントへ開き直し、「上限に達したので切り替えた。続きを進めて」と最初に送る。GUI・TUI のどちらでも動く。
+
+- 次のアカウントの順: `@default`、accounts の順。ログインしていないもの、上限に達しているもの（止まったときに記録、statusLine の使用率 100%、利用量バーの残り 0%）はリセットまで除く。リセット時刻が分からなければ1時間。
+- 切り替え先で、そのフォルダの信頼確認が出ないよう、ほかのアカウントで信頼済みなら写す（確認で止まると続きを頼めない）。
+- 中で動かした `claude -p` などは対象にしない（ペイン／ターミナルの会話 ID と一致するときだけ）。同じ会話が15分にアカウントの数だけ切り替わったら止めて通知する。使えるアカウントが無いときも通知だけ。
+- 記録: `~/.local/state/claude-accounts/failover.log`、上限中のアカウント: `claude-account list` の「上限（… まで）」。
+
 注意:
 
 - usagebar（Agent Usage）に `[[claude.profiles]]` を足すと、上限ペインと通知がアカウントごとになる。ただし usagebar はセッションのファイルがどのプロファイルの `projects` にあるかでペインのアカウントを決めるため、`projects` を共有していると判定が当たらない。サイドバーでは usagebar の `$limit` の代わりに `$acct` を使う。
-- 追加アカウントの `.claude.json` は、作るときに既定の `mcpServers` と信頼済みフォルダだけを写す。あとから既定に足した MCP サーバーは写らない。
+- 追加アカウントの `.claude.json` は、作るときに `~/.claude` のアカウントの `mcpServers` と信頼済みフォルダだけを写す。あとから既定に足した MCP サーバーは写らない。
 - 棚（herdr-shelf）を使っているなら、開き直すときは `claude-account of-session` でしまったときのアカウントを引く。
 
 ### 8. Claude Code へのワークフロー指示
