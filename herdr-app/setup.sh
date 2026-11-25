@@ -13,7 +13,8 @@
 #                            一度入れたら、以後 --usage-bar なしで流しても入れ直す（やめるときは --no-usage-bar）
 #   - keys.json            : cmd+shift+a で agents の範囲（この Space / 全部）、cmd+shift+i で右パネルの Issues を出し入れする。
 #                            cmd+shift+u で Claude のアカウントを選ぶ（起動 / この会話を別アカウントで続ける）、
-#                            cmd+shift+z でこの agent を棚にしまう、cmd+shift+s で棚から開き直す
+#                            cmd+shift+z でこの agent を棚にしまう、cmd+shift+s で棚から開き直す、
+#                            cmd+shift+m でこの agent（Claude Code / Codex / Antigravity CLI）のモデル選択を開く
 #                            （そのキーが空いているときだけ足す）
 #
 # 標準の main / agents は Herdr の更新で変わるが、複製は追従しない。Herdr を更新したらもう一度流す。
@@ -121,6 +122,7 @@ add_key cmd-shift-i tabs-env.issues
 add_key cmd-shift-u herdr-env-marks.accounts
 add_key cmd-shift-z herdr-env-marks.shelve
 add_key cmd-shift-s herdr-env-marks.restore
+add_key cmd-shift-m herdr-env-marks.model
 
 [ "$SWITCH" = 1 ] && herdr-app do layout.switch '{"name":"herdr-env"}' >/dev/null
 herdr-app status | jq -c '{layout, errors}'
