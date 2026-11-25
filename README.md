@@ -74,6 +74,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | wt-audit（終わったワークツリーの片付け） | `herdr-app ls` の GUI のスペースも突き合わせる（id は `gui:<space id>`）。スペースのフォルダと、各ターミナルがいまいるディレクトリのワークツリーに、そのターミナルの agent の状態を結びつけ、working / blocked なら `--auto` で消さない。片付けるときは GUI のスペースも閉じる。通知は TUI が動いていなければ macOS の通知 |
 | 棚（herdr-shelf） | GUI の agent も同じ条件（idle・表示していない・外部待ちでない・会話の記録が24時間更新されていない）でしまう。会話 ID は `claude-account` が付けるラベル `herdr-env.session`（無ければ起動引数の `--resume`）。`cmd+shift+z` でフォーカス中の agent をしまい、`cmd+shift+s` で棚から開き直す（GUI のターミナルから呼べば GUI に、元のスペースか同じフォルダのスペースへタブで開く）。1時間ごとの定期実行（`launchd/herdr-env.herdr-shelf.plist.in`）は TUI と GUI の両方を見る |
 | Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
+| モデルの切り替え（Claude Code の `cmd+p`） | GUI では `cmd+p` がピッカー（検索）に取られる。代わりに `cmd+shift+m` でフォーカス中の agent のモデル選択を開く（`herdr/bin/agent-model.py`）。Claude Code には既定のキー `alt+p` を送る（下書きは残る）。Codex と Antigravity CLI はモデル選択のキーが無いので `/model` を打って Enter を押す。下書きの後ろに打つと下書きごと送ってしまうため、画面を読んで入力欄が空のときだけ打ち、下書きがあるとき・動作中・確認待ちのときは打たずに通知で知らせる |
 | issue-board（issue / PR 一覧） | 右パネル（Files / Changes のスタック）に mod `issues-env` の **Issues** を足す（下記）。タブバーの Issues ボタン（`herdr-app/tabs-env.py` が標準の tabs を複製して足す）か `cmd+shift+i` で出し入れする。TUI の fzf 版をターミナルで開くことはしない（GUI にはペイン幅を変えるコマンドが無く、一覧が画面の半分を取るため） |
 | `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
 | 利用量のバー（任意。TUI の usagebar の代わり） | `setup.sh --usage-bar` で入れる mod `workspace-status-env` が、下部のステータスバーに Claude（アカウントごと）/ Antigravity / Codex / Gemini CLI の残りを出す。クリックで詳細（枠ごとの残りとリセットまでの時間）、⊞ で右のペインに固定。値は `ai-usage-collect.py` が各ツールの手元の記録から集める（下記）。入れているときは `herdr-env-marks` のカードと `statusline.sh` の 5h / 7d は出さない |
@@ -141,6 +142,7 @@ GUI はタイトルの同期を自前で持ち、ペインの ID も TUI と形�
 | `herdr/bin/herdr-ask.sh` | `~/.config/herdr/bin/herdr-ask.sh` + `~/.local/bin/herdr-ask` へ symlink |
 | `herdr/bin/herdr-await.sh` | `~/.config/herdr/bin/herdr-await.sh` + `~/.local/bin/herdr-await` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
+| `herdr/bin/agent-model.py` | `~/.config/herdr/bin/agent-model.py` + `~/.local/bin/agent-model` へ symlink（GUI の `cmd+shift+m` が呼ぶ） |
 | `herdr/bin/herdr-shelf.py` | `~/.config/herdr/bin/herdr-shelf.py` + `~/.local/bin/herdr-shelf` へ symlink |
 | `herdr/plugins/local/agent-shelf/` | `~/.config/herdr/plugins/local/agent-shelf/`（TUI の `prefix+shift+z` で棚にしまう） |
 | `launchd/herdr-env.herdr-shelf.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-shelf.plist`（1時間ごとに `herdr-shelf shelve --hours 24`） |
