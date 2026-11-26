@@ -85,6 +85,11 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新したら流し直す
 ```
 
+setup.sh は Herdr.app の利用状況の送信も止める（`~/.config/herdr-app/settings.json` に `"telemetry": false`）。
+Herdr.app は既定で、install id 付きの1日分の集計（使っている agent の名前、Space / タブ / ターミナルの数、使ったコマンド名、mod の名前など）を
+`telemetry.herdr.dev` に送っている。送り続けるときは `herdr-app/setup.sh --keep-telemetry`（設定を変えない）。
+環境変数 `DO_NOT_TRACK=1` か `HERDR_TELEMETRY=0` でも止まる。
+
 利用量のバーも出すときは `herdr-app/setup.sh --usage-bar`（一度入れれば、以後は付けずに流しても入れ直す。やめるときは `--no-usage-bar`）。
 `ai-usage-collect.py` が読むもの:
 
