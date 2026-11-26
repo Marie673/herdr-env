@@ -4,7 +4,7 @@
 #   ./install.sh              置く（既にあって中身が違うファイルは飛ばして警告する）
 #   ./install.sh --dry-run    何をするかだけ出す
 #   ./install.sh --force      中身が違うファイルも置き換える（元は <file>.bak.<日時> に残す）
-#   ./install.sh --launchd    定期実行（wt-audit --auto / herdr-pr-status sync / herdr-shelf shelve）も入れる（macOS）
+#   ./install.sh --launchd    定期実行（wt-audit --auto / herdr-pr-status sync / herdr-shelf shelve / herdr-browser-logins）も入れる（macOS）
 #
 # Herdr の GUI（Herdr.app）が入っていれば、herdr-app/setup.sh で GUI 側の表示も入れる。
 #
@@ -116,7 +116,7 @@ for pair in \
   herdr-wait:herdr-wait.sh gh-ci-wait:gh-ci-wait.sh gwt-tasks:gwt-tasks.py \
   herdr-ask:herdr-ask.sh herdr-await:herdr-await.sh wt-audit:wt-audit.sh \
   claude-account:claude-account.py herdr-gui:herdr-gui.sh herdr-shelf:herdr-shelf.py \
-  agent-model:agent-model.py; do
+  agent-model:agent-model.py herdr-browser-logins:herdr-browser-logins.sh; do
   link "$HERDR_CONF/bin/${pair#*:}" "$BIN/${pair%%:*}"
 done
 
@@ -183,7 +183,7 @@ if [ "$LAUNCHD" = 1 ]; then
   else
     brew_prefix="$(brew --prefix 2>/dev/null || echo /opt/homebrew)"
     agents="$HOME/Library/LaunchAgents"
-    run mkdir -p "$agents" "$HOME/.local/state/wt-audit" "$HOME/.local/state/herdr-pr-status" "$HOME/.local/state/herdr-shelf"
+    run mkdir -p "$agents" "$HOME/.local/state/wt-audit" "$HOME/.local/state/herdr-pr-status" "$HOME/.local/state/herdr-shelf" "$HOME/.local/state/herdr-browser-logins"
     for tpl in "$SRC"/launchd/*.plist.in; do
       name="local.$(basename "$tpl" .in)"
       label="${name%.plist}"

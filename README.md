@@ -151,6 +151,8 @@ GUI はタイトルの同期を自前で持ち、ペインの ID も TUI と形�
 | `herdr/bin/herdr-shelf.py` | `~/.config/herdr/bin/herdr-shelf.py` + `~/.local/bin/herdr-shelf` へ symlink |
 | `herdr/plugins/local/agent-shelf/` | `~/.config/herdr/plugins/local/agent-shelf/`（TUI の `prefix+shift+z` で棚にしまう） |
 | `launchd/herdr-env.herdr-shelf.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-shelf.plist`（1時間ごとに `herdr-shelf shelve --hours 24`） |
+| `herdr/bin/herdr-browser-logins.sh` | `~/.config/herdr/bin/herdr-browser-logins.sh` + `~/.local/bin/herdr-browser-logins` へ symlink（herdr-web-browser に Chrome の cookie を取り込み直す） |
+| `launchd/herdr-env.herdr-browser-logins.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-browser-logins.plist`（15分ごとに `herdr-browser-logins`。`~/.config/herdr/browser-logins` が無ければ何もしない） |
 | `herdr/bin/claude-account.py` | `~/.config/herdr/bin/claude-account.py` + `~/.local/bin/claude-account` へ symlink |
 | `claude-accounts/accounts.example` | `~/.config/claude-accounts/accounts`（自分のアカウントに書き換える） |
 | `herdr/plugins/local/claude-accounts/` | `~/.config/herdr/plugins/local/claude-accounts/` |
@@ -356,6 +358,25 @@ herdr plugin install zenbu-labs/terminal-browser  # ターミナル内ブラウ�
 ```
 
 登録状況は `herdr plugin list` で確認。
+
+#### herdr-web-browser に Chrome のログインを流し込み続ける（herdr-browser-logins）
+
+[herdr-web-browser](https://github.com/MattJColes/herdr-web-browser)（agent 用の Chromium。GUI では mod として入る）は自分のプロファイルを持つので、最初はどのサイトにもログインしていない。本体の `herdr-web-browser import-logins` で Google Chrome の cookie を一度だけ写せるが、Chrome 側でログインし直すたびに写し直すのは手間なので、`herdr-browser-logins` を launchd で15分ごとに流す。
+
+何を取り込むかは `~/.config/herdr/browser-logins` に書く。**ファイルが無ければ何もしない**（opt-in）。
+
+```
+all                 # Chrome のすべてのサイト
+# github.com        # またはサイトを1行に1つ
+# profile=Profile 1 # 読む Chrome のプロファイル（省略時は最後に使ったもの）
+```
+
+- ブラウザが動いていないときは何もしない（`import-logins` は止まっているブラウザを起動してしまうため、先に `status` を見る）。
+- 追加と上書きだけ。Chrome でログアウトしても、ブラウザ側の cookie は消えない。
+- 取り込むのは cookie だけ。パスワード、localStorage / IndexedDB に持つログイン状態は写らない。
+- 初回は macOS が Keychain の「Chrome Safe Storage」を読んでよいか聞く。許可しないと失敗する。
+- **取り込んだサイトでは、このブラウザを使うすべての agent があなたとして振る舞える。** `all` にするかは考えてから。
+- ログは `~/.local/state/herdr-browser-logins/sync.log`。止めるときは設定ファイルを消すか `launchctl bootout gui/$(id -u)/local.herdr-env.herdr-browser-logins`。
 
 #### agent-view-space の背景（重要な知見）
 
