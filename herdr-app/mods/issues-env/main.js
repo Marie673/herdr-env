@@ -509,7 +509,9 @@ export default class IssuesEnv extends View {
         if (b.code !== 0) throw new Error(lastLine(b.stderr) || "ブランチを作れませんでした");
       }
     }
-    await this.openWorktree(repo, pr.headRefName, wt?.path, args);
+    // Space の名前は PR のタイトルにする（ブランチ名はサイドバーに別に出る）
+    const title = pr.title ? ["--title", pr.title] : [];
+    await this.openWorktree(repo, pr.headRefName, wt?.path, [...args, ...title]);
   }
 
   // issue の着手: ブランチ名の提案を取りに行き、入力欄を出す
@@ -555,7 +557,8 @@ export default class IssuesEnv extends View {
         + `- まず \`gh issue view ${d.n} --comments\` で本文と議論を読む\n`
         + "- 方針の分かれ目があれば、実装の前に確認する\n"
         + `- PR の本文には \`Closes #${d.n}\` を入れる`;
-      await gwt(repo.root, [branch, "--task", task]);
+      const title = start.title ? ["--title", start.title] : [];
+      await gwt(repo.root, [branch, "--task", task, ...title]);
       d.start = null;
       d.note = { error: false, text: `${branch} の Space で Claude Code に渡しました` };
       notify({ title: `#${d.n} に着手`, body: branch, level: "success" });
