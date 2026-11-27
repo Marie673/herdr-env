@@ -20,3 +20,17 @@ claude() {
         command claude --dangerously-skip-permissions "$@"
     fi
 }
+
+# Herdr.app: herdr-core が落ちて（Herdr の再起動・クラッシュ・ログアウト）ターミナルがシェルに戻ったら、
+# 落ちる前に動いていた claude の会話を --resume で戻す（herdr-revive。/exit で終えた会話は戻さない）
+if [[ -o interactive && -n "${HC_TERMINAL_ID:-}" ]] && command -v herdr-revive > /dev/null 2>&1; then
+    _herdr_revive_once() {
+        add-zsh-hook -d precmd _herdr_revive_once
+        unfunction _herdr_revive_once
+        local line
+        line="$(herdr-revive --line $$ 2> /dev/null)"
+        [[ -n "${line}" ]] && { print -s -- "${line}"; eval "${line}"; }
+    }
+    autoload -Uz add-zsh-hook
+    add-zsh-hook precmd _herdr_revive_once
+fi

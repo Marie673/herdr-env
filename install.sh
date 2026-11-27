@@ -116,7 +116,7 @@ for pair in \
   herdr-wait:herdr-wait.sh gh-ci-wait:gh-ci-wait.sh gwt-tasks:gwt-tasks.py \
   herdr-ask:herdr-ask.sh herdr-await:herdr-await.sh wt-audit:wt-audit.sh \
   claude-account:claude-account.py herdr-gui:herdr-gui.sh herdr-shelf:herdr-shelf.py \
-  agent-model:agent-model.py herdr-browser-logins:herdr-browser-logins.sh; do
+  agent-model:agent-model.py herdr-browser-logins:herdr-browser-logins.sh herdr-revive:herdr-revive.py; do
   link "$HERDR_CONF/bin/${pair#*:}" "$BIN/${pair%%:*}"
 done
 
