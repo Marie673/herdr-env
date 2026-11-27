@@ -46,6 +46,7 @@ Claude Code にこのワークフローを守らせるための指示。グロ�
 
 - Repositories under `$(ghq root)/github.com/` (default `~/workspace/github.com/`) are the canonical checkouts and stay on `main` / `master`. A `reference-transaction` hook (`~/.config/git/hooks/reference-transaction`) aborts `git switch` / `git checkout` there, so never plan work that depends on switching branches in the canonical checkout.
 - To start branch work, run `gwt <branch>` from inside the canonical checkout. It creates the gwq worktree and opens it as a Herdr workspace.
+- `gwt` には `--title "<作業内容>"` を付け、その workspace / スペースで何をするかを短く（20文字程度、日本語でよい）書く。例: `gwt fix/login-redirect --title "ログイン後のリダイレクト修正"`。ブランチ名はサイドバーに別に出るので、ブランチ名やリポジトリ名を繰り返さない。
 - 作業はシングル agent で続ける。別の agent（Codex・Sonnet・新しい Claude）を立てて実装を任せない。
 - Under Herdr (`HERDR_ENV=1`), `gwt` を agent ペインから実行すると、新しい agent は起動せず**自分のペインがそのまま新しい workspace へ移る**（「Move to...」と同じ。会話はそのまま）。移ったあと Bash の cwd はワークツリーに移るので、以降はワークツリーで作業を続ける。元の main の workspace はペインが無くなれば閉じる。
 - Herdr の GUI（`HC_TERMINAL_ID` があり `HERDR_ENV` が無い）では、`gwt` を agent ペインから実行すると**このターンが終わったときに**、ワークツリーのスペースで同じ会話を `--resume` し直し、元のペインは閉じる。GUI はブランチをプロセスのディレクトリで判断するため、ペインを動かすだけにはしていない。`gwt` を実行したらそのターンは短く終える。移った先では「続きを進めて」が自動で入るので、人間の返事を待たずに続きを進める（そのターンを人間への問いかけで終えたときだけ、自動では進めず返事を待つ）。取り消すときは `herdr-gui cancel`。

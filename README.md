@@ -43,7 +43,7 @@ cd "$(ghq list -p Marie673/herdr-env)"
 - **ghq** が `~/workspace/github.com/<owner>/<repo>` に本体リポジトリ（canonical checkout）を置く。本体は常に `main`/`master` のまま。
 - git の `reference-transaction` フックが本体でのブランチ切り替えを**物理的に禁止**する（`git/hooks/reference-transaction`）。
 - ブランチ作業は **gwq** の worktree（`~/workspace/worktree/...=<branch>`）で行う。
-- zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開く（`zsh/gwq-herdr.zsh`）。main で動いている agent のペインから呼ぶと、新しい agent は立てずに**そのペインごと新しい workspace へ移す**（GUI の「Move to...」と同じ。会話を引き継いだままシングル agent で続ける）。素のシェルから呼んだときは新しい workspace で Claude Code を起動する。
+- zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開く（`zsh/gwq-herdr.zsh`）。main で動いている agent のペインから呼ぶと、新しい agent は立てずに**そのペインごと新しい workspace へ移す**（GUI の「Move to...」と同じ。会話を引き継いだままシングル agent で続ける）。素のシェルから呼んだときは新しい workspace で Claude Code を起動する。`--title "<作業内容>"` で workspace / スペースの名前を「そこで何をしているか」にする（ブランチ名はサイドバーに別に出るので名前には使わない）。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
@@ -67,7 +67,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | 今やっている操作の表示（`$act`） | 不要。herdr-core が Claude Code の状態と操作を自分で拾う |
 | `herdr-wait` / `gh-ci-wait` の ⏳ 外部待ち、Stop フックの 💬 要返答 | 印を hc のラベル（`herdr-env.wait` / `.since` / `.pid` / `.human`）に載せ、mod `herdr-env-marks` がサイドバー下にカードで出す。印が無いときカードは消える |
 | agents 一覧を選んでいる Space だけにする（agent-view-space） | mod `agents-env`。標準の agents を `herdr-app do mod.clone` で複製し、`herdr-app/agents-env.py` が絞り込みを足す。見出しのフォルダのボタンか `cmd+shift+a` で「この Space / 全部」を切り替える |
-| `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す |
+| `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す。スペースの名前は `--title`、無ければ移す時点の Claude Code のセッションのタイトル（ターミナルのタイトル）にする |
 | Space ごとの agent の状態 | mod `spaces-env`。標準の Spaces 一覧は畳んだときしか状態を出さず、全体は Agents 欄で見る作り。Agents を絞るとほかの Space が見えなくなるので、各行の右端に状態を出す（動作中 = スピナー、要対応 = !、返事待ち = 💬、完了 = 点、外部待ち = ⏳）。`herdr-app/spaces-env.py` が標準の spaces を複製して書き換える |
 | pr-status（worktree の Space に PR の状態） | 同じ `pr_status.py` が、GUI の worktree の Space のターミナルに hc のラベル `herdr-env.pr` / `herdr-env.ci` / `herdr-env.rv` / `herdr-env.pr_at` を付け、mod `spaces-env` が名前の後ろに出す（`#13 競合 CI ✓ CR ✓`、`#959 merged`）。Space の場所は GUI がブランチを出すのと同じく最初のターミナルがいまいるディレクトリで決める。GUI はプラグインのイベントを送らないので、取り直すのは launchd の毎分と `gh-ci-wait` のとき。ラベルは30分で失効する |
 | worktree-setup（初回の .env コピーと依存のインストール） | GUI はプラグインのイベントを送らないので、`herdr-gui` がワークツリーのスペースを開いたあと（素のシェルからの `gwt` も、agent ペインからの移動も）`wt_setup.py run --path` を切り離して呼ぶ。実行中・失敗はそのスペースのターミナルのラベル `herdr-env.setup` で `spaces-env` の行に `⚙ setup` / `✗ setup` と出し、失敗は macOS の通知でも知らせる |
@@ -76,7 +76,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
 | モデルの切り替え（Claude Code の `cmd+p`） | GUI では `cmd+p` がピッカー（検索）に取られる。代わりに `cmd+shift+m` でフォーカス中の agent のモデル選択を開く（`herdr/bin/agent-model.py`）。Claude Code には既定のキー `alt+p` を送る（下書きは残る）。Codex と Antigravity CLI はモデル選択のキーが無いので `/model` を打って Enter を押す。下書きの後ろに打つと下書きごと送ってしまうため、画面を読んで入力欄が空のときだけ打ち、下書きがあるとき・動作中・確認待ちのときは打たずに通知で知らせる |
 | issue-board（issue / PR 一覧） | 右パネル（Files / Changes のスタック）に mod `issues-env` の **Issues** を足す（下記）。タブバーの Issues ボタン（`herdr-app/tabs-env.py` が標準の tabs を複製して足す）か `cmd+shift+i` で出し入れする。TUI の fzf 版をターミナルで開くことはしない（GUI にはペイン幅を変えるコマンドが無く、一覧が画面の半分を取るため） |
-| `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
+| `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする）。`--title` を新しいスペースの名前にし、既にあるスペースは名前がフォルダ名のまま（人が付け直していない）ときだけ付け直す |
 | 利用量のバー（任意。TUI の usagebar の代わり） | `setup.sh --usage-bar` で入れる mod `workspace-status-env` が、下部のステータスバーに Claude（アカウントごと）/ Antigravity / Codex / Gemini CLI の残りを出す。クリックで詳細（枠ごとの残りとリセットまでの時間）、⊞ で右のペインに固定。値は `ai-usage-collect.py` が各ツールの手元の記録から集める（下記）。入れているときは `herdr-env-marks` のカードと `statusline.sh` の 5h / 7d は出さない |
 
 入れ方:
@@ -122,8 +122,8 @@ Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すと�
 - 画像: GUI の Markdown 表示は画像を描かないので、本文を画像の所で切り、画像は落としてきて出す（元の大きさ、`<img width>` があればそれ。パネルより広ければ縮める。押すとブラウザで開く）。
   非公開リポジトリの添付（`github.com/user-attachments/assets/…`）は API の `body_html` にある署名つきの URL で取る。表の中の画像は、表では「🖼 説明」にして表のすぐ後ろに並べる。
   落とした画像は `~/.config/herdr-app/data/issues-env/img/` に置き、14日使わなければ消す
-- issue の「着手」: haiku がブランチ名を提案し（TUI と同じ `suggest-branch.sh`）、入力欄で直して「着手」で `gwt <branch> --task` する。番号入りのワークツリーがあれば「Space へ移る」（Space が無ければ「Space を開く」）
-- PR: そのブランチの Space へ移る。無ければ「Claude Code で開く / シェルで開く」（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）
+- issue の「着手」: haiku がブランチ名を提案し（TUI と同じ `suggest-branch.sh`）、入力欄で直して「着手」で `gwt <branch> --task` する（Space の名前は issue のタイトル）。番号入りのワークツリーがあれば「Space へ移る」（Space が無ければ「Space を開く」）
+- PR: そのブランチの Space へ移る。無ければ「Claude Code で開く / シェルで開く」（Space の名前は PR のタイトル）（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）
 - データは TUI と同じ `issues.sh` / `prs.sh` の `--json`（gh の結果は TUI の一覧と共有して30秒使い回す）。パネルが見えている間だけ1分ごとに取り直す
 - `gwt` はシェル関数なので `zsh -lic` で呼ぶ。ターミナルの外から呼ぶので `HERDR_GUI=1` を付け、`herdr-gui open` がスペースを開く（会話を移す予約はしない）。
   `~/.zshrc` に gwt を直に書き写している場合は、GUI の分かれ目の条件に `|| "${HERDR_GUI:-}" == 1` を足す（足していないと「gwt がスペースを開きませんでした」と出る）
