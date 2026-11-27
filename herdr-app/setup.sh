@@ -13,25 +13,31 @@
 #                            一度入れたら、以後 --usage-bar なしで流しても入れ直す（やめるときは --no-usage-bar）
 #   - keys.json            : cmd+shift+a で agents の範囲（この Space / 全部）、cmd+shift+i で右パネルの Issues を出し入れする。
 #                            cmd+shift+u で Claude のアカウントを選ぶ（起動 / この会話を別アカウントで続ける）、
-#                            cmd+shift+z でこの agent を棚にしまう、cmd+shift+s で棚から開き直す
+#                            cmd+shift+z でこの agent を棚にしまう、cmd+shift+s で棚から開き直す、
+#                            cmd+shift+m でこの agent（Claude Code / Codex / Antigravity CLI）のモデル選択を開く
 #                            （そのキーが空いているときだけ足す）
+#   - settings.json        : 利用状況の送信（telemetry.herdr.dev への1日1回のレポート。Herdr.app は既定でオン）を止める
+#                            （"telemetry": false）。--keep-telemetry のときは触らない
 #
 # 標準の main / agents は Herdr の更新で変わるが、複製は追従しない。Herdr を更新したらもう一度流す。
 #
 #   herdr-app/setup.sh               入れて herdr-env レイアウトに切り替える
 #   herdr-app/setup.sh --no-switch   入れるだけ
 #   herdr-app/setup.sh --usage-bar   下部のステータスバーに利用量を出す（--no-usage-bar でやめる）
+#   herdr-app/setup.sh --keep-telemetry  利用状況の送信の設定を変えない
 set -eu
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 HOME_DIR="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 SWITCH=1
 USAGE=""   # 空なら、前に入れていればそのまま入れ直す
+TELEMETRY_OFF=1
 for a in "$@"; do
   case "$a" in
     --no-switch) SWITCH=0 ;;
     --usage-bar) USAGE=1 ;;
     --no-usage-bar) USAGE=0 ;;
+    --keep-telemetry) TELEMETRY_OFF=0 ;;
     *) echo "不明なオプション: $a" >&2; exit 2 ;;
   esac
 done
@@ -41,6 +47,16 @@ fi
 
 command -v herdr-app >/dev/null 2>&1 || { echo "herdr-app が見つかりません（Herdr.app を入れて一度起動してください）" >&2; exit 1; }
 [ -d "$HOME_DIR" ] || { echo "$HOME_DIR がありません（Herdr.app を一度起動してください）" >&2; exit 1; }
+
+# 0. 利用状況の送信を止める（install id 付きで、使っている agent の名前・Space / タブの数・使ったコマンド名などを毎日送る）
+if [ "$TELEMETRY_OFF" = 1 ]; then
+  S="$HOME_DIR/settings.json"
+  if [ -f "$S" ]; then
+    jq '.telemetry = false' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
+  else
+    echo '{"telemetry": false}' > "$S"
+  fi
+fi
 
 # 1. 印のカード
 mkdir -p "$HOME_DIR/mods/herdr-env-marks"
@@ -121,6 +137,7 @@ add_key cmd-shift-i tabs-env.issues
 add_key cmd-shift-u herdr-env-marks.accounts
 add_key cmd-shift-z herdr-env-marks.shelve
 add_key cmd-shift-s herdr-env-marks.restore
+add_key cmd-shift-m herdr-env-marks.model
 
 [ "$SWITCH" = 1 ] && herdr-app do layout.switch '{"name":"herdr-env"}' >/dev/null
 herdr-app status | jq -c '{layout, errors}'

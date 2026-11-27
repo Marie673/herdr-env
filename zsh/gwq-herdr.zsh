@@ -153,8 +153,11 @@ function _gwt_path() {
 }
 
 # gwt: gwq + herdr の作業開始コマンド。
-#   gwt <branch> [--task "<引き継ぎ文>"|--task-file <path>] [--no-agent] [--no-focus]
+#   gwt <branch> [--title "<作業内容>"] [--task "<引き継ぎ文>"|--task-file <path>] [--no-agent] [--no-focus]
 # ワークツリーを用意し、herdr の workspace として開く。
+# --title は workspace / スペースの名前（そこで何をしているかを短く）。ブランチ名はサイドバーに別に
+# 出るので、名前には使わない。省くと TUI はブランチ名、GUI は agent ペインからなら Claude Code の
+# セッションのタイトル、それ以外はフォルダ名になる。
 # 本体リポジトリ(main/master)はブランチ切り替えを禁止しているので、作業は必ずこの入口から始める。
 # herdr の外で実行した場合は、ワークツリーへ cd するだけ。
 # Herdr の GUI（Herdr.app）では herdr-gui がスペースを開く（agent のペインからなら、ターンの終わりに
@@ -169,7 +172,7 @@ function _gwt_path() {
 # --task を渡したときも（agent ペインからでも）新しい Claude Code を起動して、それを最初の指示として
 # 投げ、gwt-tasks の台帳へ記録する。
 function gwt() {
-    local branch="" start_agent=1 focus=1 task="" task_file=""
+    local branch="" start_agent=1 focus=1 task="" task_file="" title=""
     while (( $# )); do
         case "$1" in
             --no-agent) start_agent=0; shift ;;
@@ -182,6 +185,10 @@ function gwt() {
                 (( $# >= 2 )) || { echo "gwt: --task-file にはパスが必要です" >&2; return 2; }
                 task_file="$2"; shift 2 ;;
             --task-file=*) task_file="${1#--task-file=}"; shift ;;
+            --title)
+                (( $# >= 2 )) || { echo "gwt: --title には名前が必要です" >&2; return 2; }
+                title="$2"; shift 2 ;;
+            --title=*) title="${1#--title=}"; shift ;;
             -*) echo "gwt: 不明なオプション: $1" >&2; return 2 ;;
             *)
                 if [[ -z "${branch}" ]]; then
@@ -194,7 +201,7 @@ function gwt() {
         esac
     done
     if [[ -z "${branch}" ]]; then
-        echo "usage: gwt <branch> [--task \"<引き継ぎ文>\"|--task-file <path>] [--no-agent] [--no-focus]" >&2
+        echo "usage: gwt <branch> [--title \"<作業内容>\"] [--task \"<引き継ぎ文>\"|--task-file <path>] [--no-agent] [--no-focus]" >&2
         return 2
     fi
     if [[ -n "${task}" && -n "${task_file}" ]]; then
@@ -250,6 +257,7 @@ function gwt() {
         (( start_agent )) || gui_args+=(--no-agent)
         (( focus )) || gui_args+=(--no-focus)
         [[ -n "${task}" ]] && gui_args+=(--task "${task}")
+        [[ -n "${title}" ]] && gui_args+=(--title "${title}")
         herdr-gui open "${gui_args[@]}" || return 1
         cd "${worktree}" || return 1
         return 0
@@ -261,7 +269,7 @@ function gwt() {
     fi
 
     local opened pane workspace already
-    opened=$(herdr worktree open --cwd "${repo_root}" --path "${worktree}" --label "${branch}" --no-focus) || return 1
+    opened=$(herdr worktree open --cwd "${repo_root}" --path "${worktree}" --label "${title:-${branch}}" --no-focus) || return 1
     pane=$(print -r -- "${opened}" | jq -r '.result.root_pane.pane_id')
     workspace=$(print -r -- "${opened}" | jq -r '.result.workspace.workspace_id')
     already=$(print -r -- "${opened}" | jq -r '.result.already_open')

@@ -6,8 +6,9 @@
 #
 # 使い方:
 #   herdr-gui active                    … GUI のターミナルの中なら終了コード0
-#   herdr-gui open <branch> <worktree> [--no-agent] [--no-focus] [--task <文>]
+#   herdr-gui open <branch> <worktree> [--no-agent] [--no-focus] [--task <文>] [--title <名前>]
 #                                       … ワークツリーをスペースとして開く（gwt が呼ぶ）。
+#                                         --title はスペースの名前（そこで何をしているか）
 #                                         GUI の mod（issues-env）のようにターミナルの外から呼ぶときは
 #                                         HERDR_GUI=1 を付ける（会話を移す予約はせず、常にスペースを開く）
 #   herdr-gui move-on-stop              … Stop フックの入力を標準入力で受け、移動の予約があれば実行する
@@ -23,6 +24,11 @@
 # TUI ではペインがターンの途中で移り、agent はそのまま作業を続ける。GUI でも止まらないよう、
 # 再開するときに「移ったので続きを進めて」を最初の入力として渡す。ただし人間に聞いて終わった
 # ターン（Stop フックが HERDR_GUI_ASKED=1 を渡す）では渡さず、返事を待つ。
+#
+# スペースの名前は「そこで何をしているか」にする。名前を付けないとフォルダ名（<repo>=<branch>）に
+# なるが、ブランチ名はサイドバーに灰色で別に出るので冗長になる。--title があればそれを、無ければ
+# 会話を移すときに限り Claude Code のセッションのタイトル（ターミナルのタイトル）を使う。
+# 既にあるスペースは、名前がフォルダ名のまま（人が付け直していない）ときだけ付け直す。
 set -u
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-env/gui-move"
@@ -42,6 +48,46 @@ gui() {
 # ワークツリーのフォルダを開いているスペースの id（無ければ空）
 space_for() {
   herdr-app ls 2>/dev/null | jq -r --arg f "$1" '[.spaces[] | select(.folder == $f and (.machine == null))][0].id // empty'
+}
+
+# ターミナルのタイトルをスペースの名前に使える形にする。Claude Code が頭に付ける記号（✳ や
+# スピナー）を外し、セッションのタイトルが付く前の既定の名前は捨てる（空を返す）
+clean_title() {
+  local t
+  t="$(printf '%s' "$1" | perl -CSD -pe 's/^[^\p{L}\p{N}]+//; s/\s+$//')"
+  case "$t" in
+    ''|'Claude Code'|claude|zsh|-zsh|bash) return 0 ;;
+  esac
+  [[ "$t" =~ ^[0-9.]+$ ]] && return 0
+  printf '%s' "$t"
+}
+
+# 既にあるスペースに名前を付ける。名前がフォルダ名のまま（既定）のときだけで、人が付けた名前は残す
+name_space() {
+  local id="$1" folder="$2" title="$3" cur
+  [ -n "$id" ] && [ -n "$title" ] || return 0
+  cur="$(herdr-app ls 2>/dev/null | jq -r --arg id "$id" '.spaces[] | select(.id == $id) | .name')"
+  [ "$cur" = "$(basename "$folder")" ] || return 0
+  herdr-app do space.rename "$(jq -n --arg id "$id" --arg n "$title" '{id: $id, name: $n}')" >/dev/null 2>&1 || true
+}
+
+# スペースを開く（あれば新しいタブ、無ければ新しいスペース）。args は space.new / tab.new の引数。
+# 開いたスペースの id を OPENED_SPACE に、結果の JSON を OPENED_OUT に、tab / space を OPENED_HOW に入れる
+open_in_space() {
+  local folder="$1" title="$2" args="$3" space out
+  space="$(space_for "$folder")"
+  if [ -n "$space" ]; then
+    out="$(herdr-app do tab.new "$(jq --arg s "$space" '. + {space: $s}' <<<"$args")")" || return 1
+    name_space "$space" "$folder" "$title"
+    OPENED_HOW="tab"
+  else
+    [ -n "$title" ] && args="$(jq --arg n "$title" '. + {name: $n}' <<<"$args")"
+    out="$(herdr-app do space.new "$args")" || return 1
+    space="$(jq -r '.space // empty' <<<"$out")"
+    OPENED_HOW="space"
+  fi
+  OPENED_SPACE="$space"
+  OPENED_OUT="$out"
 }
 
 # このターミナルで動いているのが agent（Claude Code）か
@@ -92,12 +138,13 @@ setup_later() {
 }
 
 cmd_open() {
-  local branch="" worktree="" start_agent=1 focus=true task=""
+  local branch="" worktree="" start_agent=1 focus=true task="" title=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --no-agent) start_agent=0; shift ;;
       --no-focus) focus=false; shift ;;
       --task) task="${2:-}"; shift 2 ;;
+      --title) title="${2:-}"; shift 2 ;;
       -*) die "不明なオプション: $1" ;;
       *)
         if [ -z "$branch" ]; then branch="$1"; elif [ -z "$worktree" ]; then worktree="$1"; else die "引数が多すぎます: $1"; fi
@@ -110,16 +157,15 @@ cmd_open() {
   # agent のペインから呼ばれたら、会話ごと移す予約をして終わる
   if [ "$start_agent" = 1 ] && [ -z "$task" ] && self_is_agent; then
     mkdir -p "$STATE_DIR"
-    jq -n --arg wt "$worktree" --arg br "$branch" --argjson focus "$focus" \
-      '{worktree: $wt, branch: $br, focus: $focus}' > "$STATE_DIR/$HC_TERMINAL_ID"
+    jq -n --arg wt "$worktree" --arg br "$branch" --argjson focus "$focus" --arg title "$title" \
+      '{worktree: $wt, branch: $br, focus: $focus, title: $title}' > "$STATE_DIR/$HC_TERMINAL_ID"
     echo "gwt: ${branch} -> ${worktree}"
     echo "gwt: このターンが終わると、この会話をワークツリーのスペースで続けます（このペインは閉じます）。"
     echo "gwt: 取り消すときは herdr-gui cancel"
     return 0
   fi
 
-  local space args
-  space="$(space_for "$worktree")"
+  local args
   args="$(jq -n --arg folder "$worktree" --argjson focus "$focus" '{folder: $folder, focus: $focus}')"
   if [ "$start_agent" = 1 ]; then
     # ログインシェル経由で起動する（PATH と、claude のラッパー関数があればそれを通すため）。
@@ -135,21 +181,19 @@ cmd_open() {
     fi
     args="$(jq --arg c "$c; exec /bin/zsh -l" '. + {argv: ["/bin/zsh", "-lic", $c]}' <<<"$args")"
   fi
-  local out
-  if [ -n "$space" ]; then
-    out="$(herdr-app do tab.new "$(jq --arg s "$space" '. + {space: $s}' <<<"$args")")" || return 1
-    echo "gwt: ${branch} -> ${worktree}（スペース ${space} に新しいタブを開きました）"
+  open_in_space "$worktree" "$title" "$args" || return 1
+  if [ "$OPENED_HOW" = tab ]; then
+    echo "gwt: ${branch} -> ${worktree}（スペース ${OPENED_SPACE} に新しいタブを開きました）"
   else
-    out="$(herdr-app do space.new "$args")" || return 1
-    echo "gwt: ${branch} -> ${worktree}（スペース $(jq -r '.space // empty' <<<"$out") を開きました）"
+    echo "gwt: ${branch} -> ${worktree}（スペース ${OPENED_SPACE} を開きました）"
   fi
-  [ "$start_agent" = 1 ] && trust_later "$(jq -r '.terminal // empty' <<<"$out")"
+  [ "$start_agent" = 1 ] && trust_later "$(jq -r '.terminal // empty' <<<"$OPENED_OUT")"
   setup_later "$worktree"
   return 0
 }
 
 cmd_move_on_stop() {
-  local input f wt focus sid info pid argv_q cmd args space
+  local input f wt focus title sid info pid argv_q cmd args
   input="$(cat)"
   active || return 0
   f="$STATE_DIR/$HC_TERMINAL_ID"
@@ -159,6 +203,7 @@ cmd_move_on_stop() {
 
   wt="$(jq -r '.worktree' "$f")"
   focus="$(jq -r '.focus' "$f")"
+  title="$(jq -r '.title // empty' "$f")"
   rm -f "$f"
   [ -d "$wt" ] || { echo "herdr-gui: ワークツリーがありません: $wt" >&2; return 1; }
   sid="$(printf '%s' "$input" | jq -r '.session_id // empty')"
@@ -166,6 +211,7 @@ cmd_move_on_stop() {
 
   info="$(hc get "$HC_TERMINAL_ID" 2>/dev/null)" || return 1
   pid="$(jq -r '.foreground.pid // empty' <<<"$info")"
+  [ -n "$title" ] || title="$(clean_title "$(jq -r '.title // empty' <<<"$info")")"
   # 今の起動引数を引き継ぎ、会話の指定（--resume / --continue 等）だけ差し替える
   local -a argv=()
   while IFS= read -r a; do argv+=("$a"); done < <(jq -r '
@@ -196,14 +242,8 @@ cmd_move_on_stop() {
 
   args="$(jq -n --arg folder "$wt" --argjson focus "$focus" --arg c "$cmd" \
     '{folder: $folder, focus: $focus, argv: ["/bin/zsh", "-lic", $c]}')"
-  local out
-  space="$(space_for "$wt")"
-  if [ -n "$space" ]; then
-    out="$(herdr-app do tab.new "$(jq --arg s "$space" '. + {space: $s}' <<<"$args")")" || return 1
-  else
-    out="$(herdr-app do space.new "$args")" || return 1
-  fi
-  trust_later "$(jq -r '.terminal // empty' <<<"$out")"
+  open_in_space "$wt" "$title" "$args" || return 1
+  trust_later "$(jq -r '.terminal // empty' <<<"$OPENED_OUT")"
   setup_later "$wt"
   # 元のペインを閉じる。フックが返ってから閉じるよう、切り離して少し待つ
   nohup /bin/sh -c "sleep 1; hc kill $(printf '%q' "$HC_TERMINAL_ID")" >/dev/null 2>&1 &
