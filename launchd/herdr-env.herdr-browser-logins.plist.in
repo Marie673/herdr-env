@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  herdr-web-browser（agent 用の Chromium）に Google Chrome のログイン（cookie）を取り込み直す（herdr-browser-logins）。15分ごと。
+  何を取り込むかは ~/.config/herdr/browser-logins（無ければ何もしない）。ブラウザが止まっているときも何もしない。
+  install.sh --launchd が ~/Library/LaunchAgents/ に置いて launchctl bootstrap する。
+  @HOME@ / @BREW_PREFIX@ は install.sh --launchd が埋める（手で置くなら書き換える）。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.herdr-env.herdr-browser-logins</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>herdr-browser-logins</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:@BREW_PREFIX@/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/.local/state/herdr-browser-logins/sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.local/state/herdr-browser-logins/sync.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

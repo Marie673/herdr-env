@@ -11,6 +11,8 @@ symlink」にする（Codex の shadow home と同じ）。会話の記録も共
 達したら同じ会話のまま別アカウントで続けられる（switch）。
 
   claude-account [list] [--mark <id>]       一覧（既定・ログイン状態。* は今のアカウントか --mark）
+  claude-account default [--configured]    `claude` とだけ打ったときのアカウント id。accounts の `@default <id>`
+                                            が上限に達していれば、次に使えるもの（--configured は設定どおり）
   claude-account init [<id>|--all]          追加アカウントのディレクトリを作る／symlink を直す
   claude-account login <id> [args…]         そのアカウントで `claude auth login`
   claude-account status <id>                そのアカウントで `claude auth status`
@@ -20,11 +22,19 @@ symlink」にする（Codex の shadow home と同じ）。会話の記録も共
   claude-account current                    この環境のアカウント id
   claude-account start <id> [--pane P | --terminal T] [--cwd D] [-- claude の引数…]
                                             herdr: 新しいタブでそのアカウントの claude を起動
-  claude-account switch <id> [--pane P | --terminal T] [--force]
+  claude-account switch <id> [--pane P | --terminal T] [--force] [--prompt 文]
                                             herdr: ペインの会話を、同じ会話のまま別アカウントで開き直す
+                                            （--prompt は開き直した会話に最初に送る文）
                                             （--terminal は Herdr の GUI のターミナル。GUI の中では既定で自分）
   claude-account of-session <session_id>    そのセッションを最後に動かしたアカウント id
-  claude-account hook <session-start|session-end|statusline>   Claude Code の hooks / statusLine から呼ぶ
+  claude-account hook <session-start|session-end|statusline|stop-failure>
+                                            Claude Code の hooks / statusLine から呼ぶ
+
+既定（`@default`）と ~/.claude は別物: ~/.claude は CLAUDE_CONFIG_DIR 無しでログイン情報を持つ
+アカウント（accounts の最初の行）、`@default` は `claude` とだけ打ったときに使うアカウント。
+
+上限で止まったとき（StopFailure の rate_limit）は、同じ会話のまま次に使えるアカウントへ
+自動で切り替え、続きを頼む（hook stop-failure）。上限に達したアカウントはリセットまで使わない。
 """
 import json
 import os
@@ -52,6 +62,7 @@ SHARED_FILES = ["settings.json", "CLAUDE.md", "statusline.sh", "history.jsonl", 
 # .claude.json のうち、追加アカウントを作るときに既定から写すキー（ログイン情報は写さない）
 COPY_KEYS = ["mcpServers", "theme", "editorMode"]
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+PREFERRED = None  # accounts の `@default <id>`
 
 
 def die(msg, code=1):
@@ -98,11 +109,15 @@ class Account(object):
 def accounts():
     if not os.path.isfile(CONF):
         die("アカウントの定義がありません: %s" % CONF)
+    global PREFERRED
     out = []
     with open(CONF, encoding="utf-8") as f:
         for n, line in enumerate(f, 1):
             line = line.strip()
             if not line or line.startswith("#"):
+                continue
+            if line.startswith("@default"):
+                PREFERRED = (line.split() + [""])[1]
                 continue
             parts = line.split(None, 3)
             if len(parts) < 2 or not ID_RE.match(parts[0]):
@@ -134,6 +149,74 @@ def from_config_dir(config_dir):
         if a.path == real:
             return a
     return None
+
+
+def preferred():
+    """`claude` とだけ打ったときのアカウント（accounts の `@default`。無ければ最初の行）"""
+    accts = accounts()
+    for a in accts:
+        if a.id == PREFERRED:
+            return a
+    return accts[0]
+
+
+# ---- 上限（使えるアカウントの選び方） ---------------------------------------------------
+
+EXHAUSTED = os.path.join(STATE, "exhausted.json")
+
+
+def load_exhausted():
+    try:
+        with open(EXHAUSTED) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    now = time.time()
+    return {k: v for k, v in d.items() if isinstance(v, (int, float)) and v > now}
+
+
+def mark_exhausted(a, until):
+    d = load_exhausted()
+    if d.get(a.id, 0) >= until:
+        return
+    d[a.id] = until
+    os.makedirs(STATE, exist_ok=True)
+    tmp = EXHAUSTED + ".%d" % os.getpid()
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, EXHAUSTED)
+
+
+def usage_windows():
+    """ai-usage-collect.py（利用量バー）が集めるアカウントごとの残り。{id: [window…]}。取れなければ {}"""
+    try:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "ai-usage-collect.py")
+        spec = importlib.util.spec_from_file_location("ai_usage_collect", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return {x["id"]: x.get("windows") or [] for x in mod.collect_claude(time.time()).get("accounts", [])}
+    except Exception:
+        return {}
+
+
+def blocked_until(a, windows=None):
+    """そのアカウントが上限で使えない間の終わり（使えるなら 0）"""
+    until = load_exhausted().get(a.id, 0)
+    now = time.time()
+    for w in (windows or {}).get(a.id, []):
+        rs = w.get("resets_at") or 0
+        if isinstance(w.get("remaining"), (int, float)) and w["remaining"] <= 0 and rs > now:
+            until = max(until, rs)
+    return until
+
+
+def available(exclude=()):
+    """使えるアカウントを、既定・accounts の順に。ログインしていないもの、上限に達しているものは除く"""
+    windows = usage_windows()
+    pref = preferred()
+    order = [pref] + [a for a in accounts() if a.id != pref.id]
+    return [a for a in order if a.id not in exclude and a.oauth() and not blocked_until(a, windows)]
 
 
 # ---- 状態（どのセッションをどのアカウントで動かしたか） --------------------------------
@@ -213,6 +296,37 @@ def seed_claude_json(a):
     with open(a.claude_json, "w", encoding="utf-8") as f:
         json.dump(seed, f, ensure_ascii=False, indent=2)
     os.chmod(a.claude_json, 0o600)
+
+
+def ensure_trust(a, cwd):
+    """切り替え先のアカウントで、そのフォルダの信頼確認が出ないようにする（ほかのアカウントで信頼済みなら写す）。
+    信頼確認で止まると、自動で切り替えたあと続きを頼めない"""
+    if not cwd:
+        return
+    cwd = os.path.realpath(cwd)
+
+    def trusted(acct):
+        try:
+            with open(acct.claude_json, encoding="utf-8") as f:
+                projects = json.load(f).get("projects") or {}
+        except (OSError, ValueError):
+            return False
+        return any(os.path.realpath(p) == cwd and isinstance(v, dict) and v.get("hasTrustDialogAccepted")
+                   for p, v in projects.items())
+
+    if trusted(a) or not any(trusted(b) for b in accounts() if b.id != a.id):
+        return
+    try:
+        with open(a.claude_json, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return
+    d.setdefault("projects", {}).setdefault(cwd, {})["hasTrustDialogAccepted"] = True
+    tmp = a.claude_json + ".claude-account.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, a.claude_json)
 
 
 # ---- herdr --------------------------------------------------------------------
@@ -353,14 +467,18 @@ def pad(text, cols):
 def cmd_list(argv):
     opts, _ = parse_opts(argv, {"mark": True})
     here = find(opts["mark"]) if opts.get("mark") else from_config_dir(os.environ.get("CLAUDE_CONFIG_DIR"))
+    pref = preferred()
+    blocked = load_exhausted()
     for a in accounts():
         o = a.oauth()
         who = "%s / %s" % (o.get("emailAddress", "?"), o.get("organizationName", "?")) if o else "未ログイン"
         plan = (o.get("organizationType") or o.get("billingType") or "") if o else ""
         mark = "*" if here and here.id == a.id else " "
         print("%s %s %s %s %s %s" % (mark, pad(a.id, 10), pad(a.display, 14),
-                                     pad(a.config_dir + (" (既定)" if a.default else ""), 24),
-                                     who, ("[%s]" % plan) if plan else ""))
+                                     pad(a.config_dir + (" (既定)" if a.id == pref.id else ""), 24),
+                                     who, ("[%s]" % plan) if plan else "")
+              + ("  上限（%s まで）" % time.strftime("%m/%d %H:%M", time.localtime(blocked[a.id]))
+                 if a.id in blocked else ""))
 
 
 def cmd_init(argv):
@@ -422,6 +540,14 @@ def cmd_current(argv):
     if not a:
         die("CLAUDE_CONFIG_DIR=%s はどのアカウントでもありません" % os.environ.get("CLAUDE_CONFIG_DIR"))
     print(a.id)
+
+
+def cmd_default(argv):
+    if "--configured" in argv:
+        print(preferred().id)
+        return
+    usable = available()
+    print((usable[0] if usable else preferred()).id)
 
 
 def cmd_of_session(argv):
@@ -520,7 +646,8 @@ def gui_switch(a, opts):
     if term == os.environ.get("HC_TERMINAL_ID") and not opts.get("detached"):
         log = open(os.path.join(STATE, "switch.log"), "a") if os.path.isdir(STATE) else subprocess.DEVNULL
         subprocess.Popen([sys.executable, os.path.abspath(__file__), "switch", a.id, "--terminal", term, "--detached"]
-                         + (["--force"] if opts.get("force") else []),
+                         + (["--force"] if opts.get("force") else [])
+                         + (["--prompt", opts["prompt"]] if opts.get("prompt") else []),
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
         print("%s に切り替えます。このセッションはいったん終了し、同じ会話のまま開き直します" % a.display)
         return
@@ -538,7 +665,8 @@ def gui_switch(a, opts):
             break
     else:
         die("claude が終了しませんでした（ターミナル %s）" % term)
-    line = "%s --resume %s" % (claude_line(a, []), sid)
+    ensure_trust(a, cwd)
+    line = claude_line(a, ["--resume", sid] + ([opts["prompt"]] if opts.get("prompt") else []))
     if alive:
         # ターミナルにシェルが残った: そこで続ける（先頭の空白で履歴に残さない）
         time.sleep(0.3)
@@ -557,7 +685,8 @@ def gui_switch(a, opts):
 
 def cmd_switch(argv):
     """ペインの claude を終了し、同じ会話を別アカウントで --resume する。"""
-    opts, rest = parse_opts(argv, {"pane": True, "terminal": True, "force": False, "detached": False})
+    opts, rest = parse_opts(argv, {"pane": True, "terminal": True, "force": False, "detached": False,
+                                   "prompt": True})
     if not rest:
         die("使い方: claude-account switch <id> [--pane P | --terminal T]")
     a = find(rest[0])
@@ -581,12 +710,15 @@ def cmd_switch(argv):
     if pane == os.environ.get("HERDR_PANE_ID") and not opts.get("detached"):
         log = open(os.path.join(STATE, "switch.log"), "a") if os.path.isdir(STATE) else subprocess.DEVNULL
         subprocess.Popen([sys.executable, os.path.abspath(__file__), "switch", a.id, "--pane", pane, "--detached"]
-                         + (["--force"] if opts.get("force") else []),
+                         + (["--force"] if opts.get("force") else [])
+                         + (["--prompt", opts["prompt"]] if opts.get("prompt") else []),
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
         print("%s に切り替えます。このセッションはいったん終了し、同じ会話のまま開き直します" % a.display)
         return
 
     name = ag.get("name")
+    info = herdr(["pane", "get", pane], check=False).get("result", {}).get("pane", {})
+    ensure_trust(a, info.get("foreground_cwd") or info.get("cwd"))
     herdr(["pane", "send-keys", pane, "escape"], check=False)
     herdr(["pane", "send-text", pane, "/exit"])
     herdr(["pane", "send-keys", pane, "enter"])
@@ -605,7 +737,7 @@ def cmd_switch(argv):
     taken = taken_names()
     if not name or name in taken:
         name = new_name("c-" + a.id, taken)
-    start_agent(name, pane, ["--resume", sid])
+    start_agent(name, pane, ["--resume", sid] + ([opts["prompt"]] if opts.get("prompt") else []))
     remember_session(sid, a)
     msg = "%s に切り替えました（同じ会話を再開）" % a.display
     print(msg)
@@ -680,6 +812,68 @@ def gui_hook(term, event, a, data):
         gui_label(term, **kv)
 
 
+FAILOVER = os.path.join(STATE, "failover.json")
+
+
+def failover_log(msg):
+    os.makedirs(STATE, exist_ok=True)
+    with open(os.path.join(STATE, "failover.log"), "a") as f:
+        f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+
+
+def stop_failure(a, data, pane, term):
+    """StopFailure（rate_limit）: 上限に達したアカウントを記録し、同じ会話を次のアカウントで開き直して続きを頼む"""
+    sid = data.get("session_id")
+    if data.get("error") != "rate_limit" or not a or not sid:
+        return
+    if "1M context" in (data.get("last_assistant_message") or ""):
+        return  # 1M コンテキストの追加クレジットの話で、上限ではない
+    # この会話がそのペイン／ターミナルの主の会話か（中で動かした claude -p などは切り替えない）
+    if term:
+        if (hc(["get", term, "--json"], check=False).get("labels") or {}).get("herdr-env.session") != sid:
+            return
+    elif pane:
+        ag = agent_in_pane(pane) or {}
+        if (ag.get("agent_session") or {}).get("value") != sid:
+            return
+    else:
+        return
+    # 上限に達した枠のリセットまで、そのアカウントは使わない（分からなければ1時間）
+    until = blocked_until(a, usage_windows())
+    mark_exhausted(a, until if until > time.time() else time.time() + 3600)
+    # 同じ会話が短い間に何度も切り替わるなら止める（全部のアカウントが上限など）
+    try:
+        with open(FAILOVER) as f:
+            hist = json.load(f)
+    except (OSError, ValueError):
+        hist = {}
+    now = time.time()
+    hist = {k: [t for t in v if now - t < 900] for k, v in hist.items()}
+    hist = {k: v for k, v in hist.items() if v}
+    if len(hist.get(sid, [])) >= len(accounts()):
+        failover_log("%s: 15分で %d 回切り替えたので止めます" % (sid, len(hist[sid])))
+        notify("Claude の上限: 自動の切り替えを止めました", "15分で何度も上限に達しています")
+        return
+    nxt = available(exclude=(a.id,))
+    if not nxt:
+        failover_log("%s: %s が上限、使えるアカウントがありません" % (sid, a.id))
+        notify("Claude の上限: 使えるアカウントがありません", "%s が上限に達しました" % a.display)
+        return
+    b = nxt[0]
+    hist.setdefault(sid, []).append(now)
+    os.makedirs(STATE, exist_ok=True)
+    with open(FAILOVER, "w") as f:
+        json.dump(hist, f)
+    prompt = ("（自動）%s の利用上限に達したので、%s に切り替えて同じ会話を開き直しました。"
+              "中断したところから続きを進めてください。" % (a.label, b.label))
+    target = ["--terminal", term] if term else ["--pane", pane]
+    failover_log("%s: %s -> %s (%s)" % (sid, a.id, b.id, " ".join(target)))
+    log = open(os.path.join(STATE, "switch.log"), "a")
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "switch", b.id] + target
+                     + ["--detached", "--force", "--prompt", prompt],
+                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+
+
 def cmd_hook(argv):
     """SessionStart / SessionEnd / statusline。どのアカウントで動いているかをサイドバーとセッション台帳に残す。
 
@@ -695,6 +889,13 @@ def cmd_hook(argv):
     term = os.environ.get("HC_TERMINAL_ID") if not pane else None
     if term:
         gui_hook(term, event, a, data)
+    if event == "stop-failure":
+        return stop_failure(a, data, pane, term)
+    if event == "statusline" and a:
+        for w in (data.get("rate_limits") or {}).values():
+            if isinstance(w, dict) and (w.get("used_percentage") or 0) >= 100 \
+                    and (w.get("resets_at") or 0) > time.time():
+                mark_exhausted(a, w["resets_at"])
     if event in ("session-start", "statusline"):
         if a:
             remember_session(data.get("session_id"), a)
@@ -708,7 +909,7 @@ def cmd_hook(argv):
 COMMANDS = {
     "list": cmd_list, "init": cmd_init, "login": cmd_login, "status": cmd_status, "env": cmd_env,
     "exec": cmd_exec, "dir": cmd_dir, "current": cmd_current, "start": cmd_start, "switch": cmd_switch,
-    "of-session": cmd_of_session, "hook": cmd_hook,
+    "of-session": cmd_of_session, "hook": cmd_hook, "default": cmd_default,
 }
 
 

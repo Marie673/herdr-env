@@ -17,6 +17,8 @@
 //   accounts … アカウントを選んで起動 / フォーカス中の会話を別アカウントで続ける（claude-accounts のピッカー）
 //   shelve   … フォーカス中の agent のセッションを棚にしまう（herdr-shelf）
 //   restore  … 棚から開き直す（herdr-shelf restore）
+//   model    … フォーカス中の agent（Claude Code / Codex / Antigravity CLI）のモデル選択を開く（agent-model.py）。
+//              GUI では cmd+p がピッカーに取られて Claude Code のモデル切り替えが押せないための代わり
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -65,6 +67,11 @@ export default class HerdrEnvMarks extends View {
       this.below([`CLAUDE_ACCOUNT_ORIGIN_TERMINAL=${term}`], 'exec "$HOME/.config/herdr/plugins/local/claude-accounts/bin/pick.sh"');
     } else if (c === "restore") {
       this.below([], 'herdr-shelf restore || read -r -p "Enter で閉じます" _');
+    } else if (c === "model") {
+      if (!term) return;
+      const r = await exec("/usr/bin/python3", [`${home()}/.config/herdr/bin/agent-model.py`, term], { timeout: 15000 });
+      // 開けたときはその agent の画面に選択が出るので、知らせるのは開けなかったときだけ
+      if (r.code !== 0) notify({ title: "モデルを切り替えられません", body: (r.stdout || r.stderr || "").trim(), level: "warning" });
     } else if (c === "shelve") {
       if (!term) return;
       const r = await exec("/bin/bash", ["-lc", `herdr-shelf shelve --terminal ${term}`], { timeout: 30000 });

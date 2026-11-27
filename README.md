@@ -43,7 +43,7 @@ cd "$(ghq list -p Marie673/herdr-env)"
 - **ghq** が `~/workspace/github.com/<owner>/<repo>` に本体リポジトリ（canonical checkout）を置く。本体は常に `main`/`master` のまま。
 - git の `reference-transaction` フックが本体でのブランチ切り替えを**物理的に禁止**する（`git/hooks/reference-transaction`）。
 - ブランチ作業は **gwq** の worktree（`~/workspace/worktree/...=<branch>`）で行う。
-- zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開く（`zsh/gwq-herdr.zsh`）。main で動いている agent のペインから呼ぶと、新しい agent は立てずに**そのペインごと新しい workspace へ移す**（GUI の「Move to...」と同じ。会話を引き継いだままシングル agent で続ける）。素のシェルから呼んだときは新しい workspace で Claude Code を起動する。
+- zsh 関数 **`gwt <branch>`** が入口: worktree を作り、Herdr の workspace として開く（`zsh/gwq-herdr.zsh`）。main で動いている agent のペインから呼ぶと、新しい agent は立てずに**そのペインごと新しい workspace へ移す**（GUI の「Move to...」と同じ。会話を引き継いだままシングル agent で続ける）。素のシェルから呼んだときは新しい workspace で Claude Code を起動する。`--title "<作業内容>"` で workspace / スペースの名前を「そこで何をしているか」にする（ブランチ名はサイドバーに別に出るので名前には使わない）。
 - Herdr のサイドバーは Claude Code の hooks（`claude/hooks/herdr-activity.sh`）から「今やっている操作」（実行中のコマンド、読んでいるファイル等）をリアルタイム表示する。
 - **`herdr-wait`** が「外部待ち」（CodeRabbit のレビュー、CI 等）を idle と区別して表示する（`herdr/bin/herdr-wait.sh`）。
 - **`gh-ci-wait`** が PR の CI 完了を確実に検知して終わり、待ち印を自分の寿命に結びつける（`herdr/bin/gh-ci-wait.sh`）。
@@ -67,15 +67,17 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | 今やっている操作の表示（`$act`） | 不要。herdr-core が Claude Code の状態と操作を自分で拾う |
 | `herdr-wait` / `gh-ci-wait` の ⏳ 外部待ち、Stop フックの 💬 要返答 | 印を hc のラベル（`herdr-env.wait` / `.since` / `.pid` / `.human`）に載せ、mod `herdr-env-marks` がサイドバー下にカードで出す。印が無いときカードは消える |
 | agents 一覧を選んでいる Space だけにする（agent-view-space） | mod `agents-env`。標準の agents を `herdr-app do mod.clone` で複製し、`herdr-app/agents-env.py` が絞り込みを足す。見出しのフォルダのボタンか `cmd+shift+a` で「この Space / 全部」を切り替える |
-| `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す |
+| `gwt`（agent ペインから） | `herdr-gui` が「このターンが終わったら、ワークツリーのスペースで同じ会話を `--resume` し、元のペインを閉じる」を予約し、Stop フック（`herdr-activity.sh`）が実行する。GUI はブランチをプロセスのディレクトリで判断するので、ペインを動かすだけにはしない。フォルダの信頼確認は TUI の gwt と同じく「Yes」に合わせたのを確かめてから通す。スペースの名前は `--title`、無ければ移す時点の Claude Code のセッションのタイトル（ターミナルのタイトル）にする |
 | Space ごとの agent の状態 | mod `spaces-env`。標準の Spaces 一覧は畳んだときしか状態を出さず、全体は Agents 欄で見る作り。Agents を絞るとほかの Space が見えなくなるので、各行の右端に状態を出す（動作中 = スピナー、要対応 = !、返事待ち = 💬、完了 = 点、外部待ち = ⏳）。`herdr-app/spaces-env.py` が標準の spaces を複製して書き換える |
 | pr-status（worktree の Space に PR の状態） | 同じ `pr_status.py` が、GUI の worktree の Space のターミナルに hc のラベル `herdr-env.pr` / `herdr-env.ci` / `herdr-env.rv` / `herdr-env.pr_at` を付け、mod `spaces-env` が名前の後ろに出す（`#13 競合 CI ✓ CR ✓`、`#959 merged`）。Space の場所は GUI がブランチを出すのと同じく最初のターミナルがいまいるディレクトリで決める。GUI はプラグインのイベントを送らないので、取り直すのは launchd の毎分と `gh-ci-wait` のとき。ラベルは30分で失効する |
 | worktree-setup（初回の .env コピーと依存のインストール） | GUI はプラグインのイベントを送らないので、`herdr-gui` がワークツリーのスペースを開いたあと（素のシェルからの `gwt` も、agent ペインからの移動も）`wt_setup.py run --path` を切り離して呼ぶ。実行中・失敗はそのスペースのターミナルのラベル `herdr-env.setup` で `spaces-env` の行に `⚙ setup` / `✗ setup` と出し、失敗は macOS の通知でも知らせる |
 | wt-audit（終わったワークツリーの片付け） | `herdr-app ls` の GUI のスペースも突き合わせる（id は `gui:<space id>`）。スペースのフォルダと、各ターミナルがいまいるディレクトリのワークツリーに、そのターミナルの agent の状態を結びつけ、working / blocked なら `--auto` で消さない。片付けるときは GUI のスペースも閉じる。通知は TUI が動いていなければ macOS の通知 |
 | 棚（herdr-shelf） | GUI の agent も同じ条件（idle・表示していない・外部待ちでない・会話の記録が24時間更新されていない）でしまう。会話 ID は `claude-account` が付けるラベル `herdr-env.session`（無ければ起動引数の `--resume`）。`cmd+shift+z` でフォーカス中の agent をしまい、`cmd+shift+s` で棚から開き直す（GUI のターミナルから呼べば GUI に、元のスペースか同じフォルダのスペースへタブで開く）。1時間ごとの定期実行（`launchd/herdr-env.herdr-shelf.plist.in`）は TUI と GUI の両方を見る |
+| 落ちた会話の再開（herdr-revive） | herdr-core が落ちる（Herdr の再起動・クラッシュ・ログアウト）と、ターミナルは同じアドレスのまま最後のフォルダのシェルに戻り、claude は二度と動かない。シェルの起動時（`zsh/claude-account.zsh` の precmd 1回）に `herdr-revive --line $$` が、そのターミナルのラベル `herdr-env.session` / `herdr-env.acct_id` から `claude -A <acct> --resume <id>` を打ち直す。/exit・Ctrl-C で終えた会話は SessionEnd hook がラベルを消すので戻さない。同じ会話がほかで動いているとき・記録が無いときも戻さず、同じシェル・同じ会話では一度しか試さない。すでにシェルに戻っている分は `herdr-revive` で一括（`--dry-run` で対象だけ） |
 | Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_rs`（そのリセット時刻）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので、リセット時刻と残りで選んだ一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
+| モデルの切り替え（Claude Code の `cmd+p`） | GUI では `cmd+p` がピッカー（検索）に取られる。代わりに `cmd+shift+m` でフォーカス中の agent のモデル選択を開く（`herdr/bin/agent-model.py`）。Claude Code には既定のキー `alt+p` を送る（下書きは残る）。Codex と Antigravity CLI はモデル選択のキーが無いので `/model` を打って Enter を押す。下書きの後ろに打つと下書きごと送ってしまうため、画面を読んで入力欄が空のときだけ打ち、下書きがあるとき・動作中・確認待ちのときは打たずに通知で知らせる |
 | issue-board（issue / PR 一覧） | 右パネル（Files / Changes のスタック）に mod `issues-env` の **Issues** を足す（下記）。タブバーの Issues ボタン（`herdr-app/tabs-env.py` が標準の tabs を複製して足す）か `cmd+shift+i` で出し入れする。TUI の fzf 版をターミナルで開くことはしない（GUI にはペイン幅を変えるコマンドが無く、一覧が画面の半分を取るため） |
-| `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする） |
+| `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする）。`--title` を新しいスペースの名前にし、既にあるスペースは名前がフォルダ名のまま（人が付け直していない）ときだけ付け直す |
 | 利用量のバー（任意。TUI の usagebar の代わり） | `setup.sh --usage-bar` で入れる mod `workspace-status-env` が、下部のステータスバーに Claude（アカウントごと）/ Antigravity / Codex / Gemini CLI の残りを出す。クリックで詳細（枠ごとの残りとリセットまでの時間）、⊞ で右のペインに固定。値は `ai-usage-collect.py` が各ツールの手元の記録から集める（下記）。入れているときは `herdr-env-marks` のカードと `statusline.sh` の 5h / 7d は出さない |
 
 入れ方:
@@ -83,6 +85,11 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 ```sh
 herdr-app/setup.sh        # install.sh からも呼ばれる。Herdr を更新したら流し直す
 ```
+
+setup.sh は Herdr.app の利用状況の送信も止める（`~/.config/herdr-app/settings.json` に `"telemetry": false`）。
+Herdr.app は既定で、install id 付きの1日分の集計（使っている agent の名前、Space / タブ / ターミナルの数、使ったコマンド名、mod の名前など）を
+`telemetry.herdr.dev` に送っている。送り続けるときは `herdr-app/setup.sh --keep-telemetry`（設定を変えない）。
+環境変数 `DO_NOT_TRACK=1` か `HERDR_TELEMETRY=0` でも止まる。
 
 利用量のバーも出すときは `herdr-app/setup.sh --usage-bar`（一度入れれば、以後は付けずに流しても入れ直す。やめるときは `--no-usage-bar`）。
 `ai-usage-collect.py` が読むもの:
@@ -117,8 +124,8 @@ Herdr を更新したら `setup.sh` をもう一度流す。標準に戻すと�
 - 画像: GUI の Markdown 表示は画像を描かないので、本文を画像の所で切り、画像は落としてきて出す（元の大きさ、`<img width>` があればそれ。パネルより広ければ縮める。押すとブラウザで開く）。
   非公開リポジトリの添付（`github.com/user-attachments/assets/…`）は API の `body_html` にある署名つきの URL で取る。表の中の画像は、表では「🖼 説明」にして表のすぐ後ろに並べる。
   落とした画像は `~/.config/herdr-app/data/issues-env/img/` に置き、14日使わなければ消す
-- issue の「着手」: haiku がブランチ名を提案し（TUI と同じ `suggest-branch.sh`）、入力欄で直して「着手」で `gwt <branch> --task` する。番号入りのワークツリーがあれば「Space へ移る」（Space が無ければ「Space を開く」）
-- PR: そのブランチの Space へ移る。無ければ「Claude Code で開く / シェルで開く」（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）
+- issue の「着手」: haiku がブランチ名を提案し（TUI と同じ `suggest-branch.sh`）、入力欄で直して「着手」で `gwt <branch> --task` する（Space の名前は issue のタイトル）。番号入りのワークツリーがあれば「Space へ移る」（Space が無ければ「Space を開く」）
+- PR: そのブランチの Space へ移る。無ければ「Claude Code で開く / シェルで開く」（Space の名前は PR のタイトル）（ローカルにブランチが無ければ origin から取る。フォークの PR は開かない）
 - データは TUI と同じ `issues.sh` / `prs.sh` の `--json`（gh の結果は TUI の一覧と共有して30秒使い回す）。パネルが見えている間だけ1分ごとに取り直す
 - `gwt` はシェル関数なので `zsh -lic` で呼ぶ。ターミナルの外から呼ぶので `HERDR_GUI=1` を付け、`herdr-gui open` がスペースを開く（会話を移す予約はしない）。
   `~/.zshrc` に gwt を直に書き写している場合は、GUI の分かれ目の条件に `|| "${HERDR_GUI:-}" == 1` を足す（足していないと「gwt がスペースを開きませんでした」と出る）
@@ -142,9 +149,13 @@ GUI はタイトルの同期を自前で持ち、ペインの ID も TUI と形�
 | `herdr/bin/herdr-ask.sh` | `~/.config/herdr/bin/herdr-ask.sh` + `~/.local/bin/herdr-ask` へ symlink |
 | `herdr/bin/herdr-await.sh` | `~/.config/herdr/bin/herdr-await.sh` + `~/.local/bin/herdr-await` へ symlink |
 | `herdr/bin/wt-audit.sh` | `~/.config/herdr/bin/wt-audit.sh` + `~/.local/bin/wt-audit` へ symlink |
+| `herdr/bin/agent-model.py` | `~/.config/herdr/bin/agent-model.py` + `~/.local/bin/agent-model` へ symlink（GUI の `cmd+shift+m` が呼ぶ） |
 | `herdr/bin/herdr-shelf.py` | `~/.config/herdr/bin/herdr-shelf.py` + `~/.local/bin/herdr-shelf` へ symlink |
+| `herdr/bin/herdr-revive.py` | `~/.config/herdr/bin/herdr-revive.py` + `~/.local/bin/herdr-revive` へ symlink |
 | `herdr/plugins/local/agent-shelf/` | `~/.config/herdr/plugins/local/agent-shelf/`（TUI の `prefix+shift+z` で棚にしまう） |
 | `launchd/herdr-env.herdr-shelf.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-shelf.plist`（1時間ごとに `herdr-shelf shelve --hours 24`） |
+| `herdr/bin/herdr-browser-logins.sh` | `~/.config/herdr/bin/herdr-browser-logins.sh` + `~/.local/bin/herdr-browser-logins` へ symlink（herdr-web-browser に Chrome の cookie を取り込み直す） |
+| `launchd/herdr-env.herdr-browser-logins.plist.in` | `~/Library/LaunchAgents/local.herdr-env.herdr-browser-logins.plist`（15分ごとに `herdr-browser-logins`。`~/.config/herdr/browser-logins` が無ければ何もしない） |
 | `herdr/bin/claude-account.py` | `~/.config/herdr/bin/claude-account.py` + `~/.local/bin/claude-account` へ symlink |
 | `claude-accounts/accounts.example` | `~/.config/claude-accounts/accounts`（自分のアカウントに書き換える） |
 | `herdr/plugins/local/claude-accounts/` | `~/.config/herdr/plugins/local/claude-accounts/` |
@@ -350,6 +361,25 @@ herdr plugin install zenbu-labs/terminal-browser  # ターミナル内ブラウ�
 ```
 
 登録状況は `herdr plugin list` で確認。
+
+#### herdr-web-browser に Chrome のログインを流し込み続ける（herdr-browser-logins）
+
+[herdr-web-browser](https://github.com/MattJColes/herdr-web-browser)（agent 用の Chromium。GUI では mod として入る）は自分のプロファイルを持つので、最初はどのサイトにもログインしていない。本体の `herdr-web-browser import-logins` で Google Chrome の cookie を一度だけ写せるが、Chrome 側でログインし直すたびに写し直すのは手間なので、`herdr-browser-logins` を launchd で15分ごとに流す。
+
+何を取り込むかは `~/.config/herdr/browser-logins` に書く。**ファイルが無ければ何もしない**（opt-in）。
+
+```
+all                 # Chrome のすべてのサイト
+# github.com        # またはサイトを1行に1つ
+# profile=Profile 1 # 読む Chrome のプロファイル（省略時は最後に使ったもの）
+```
+
+- ブラウザが動いていないときは何もしない（`import-logins` は止まっているブラウザを起動してしまうため、先に `status` を見る）。
+- 追加と上書きだけ。Chrome でログアウトしても、ブラウザ側の cookie は消えない。
+- 取り込むのは cookie だけ。パスワード、localStorage / IndexedDB に持つログイン状態は写らない。
+- 初回は macOS が Keychain の「Chrome Safe Storage」を読んでよいか聞く。許可しないと失敗する。
+- **取り込んだサイトでは、このブラウザを使うすべての agent があなたとして振る舞える。** `all` にするかは考えてから。
+- ログは `~/.local/state/herdr-browser-logins/sync.log`。止めるときは設定ファイルを消すか `launchctl bootout gui/$(id -u)/local.herdr-env.herdr-browser-logins`。
 
 #### agent-view-space の背景（重要な知見）
 
@@ -563,10 +593,19 @@ herdr plugin link ~/.config/herdr/plugins/local/claude-accounts
 | 今のペインの会話を別アカウントで続ける | `prefix+shift+u` → ctrl-s（`claude-account switch <id>`）。`/exit` して、そのペインのシェルに `CLAUDE_CONFIG_DIR` を入れ、同じ agent 名で `--resume` する |
 | シェルから | `claude -A <id>`、`eval "$(claude-account env <id>)"` |
 
+**既定のアカウント**: `claude` とだけ打ったとき（Herdr.app の＋メニューから起動したときも）のアカウントは、accounts に `@default <id>` と書いて選ぶ（無ければ最初の行）。`~/.claude` のアカウント（最初の行）とは別に決められる。上限に達していれば、次に使えるアカウントで起動する（`claude-account default`）。
+
+**上限での自動切り替え**: 会話が上限で止まると（StopFailure の `rate_limit`）、`claude-account hook stop-failure` が同じ会話のまま次に使えるアカウントへ開き直し、「上限に達したので切り替えた。続きを進めて」と最初に送る。GUI・TUI のどちらでも動く。
+
+- 次のアカウントの順: `@default`、accounts の順。ログインしていないもの、上限に達しているもの（止まったときに記録、statusLine の使用率 100%、利用量バーの残り 0%）はリセットまで除く。リセット時刻が分からなければ1時間。
+- 切り替え先で、そのフォルダの信頼確認が出ないよう、ほかのアカウントで信頼済みなら写す（確認で止まると続きを頼めない）。
+- 中で動かした `claude -p` などは対象にしない（ペイン／ターミナルの会話 ID と一致するときだけ）。同じ会話が15分にアカウントの数だけ切り替わったら止めて通知する。使えるアカウントが無いときも通知だけ。
+- 記録: `~/.local/state/claude-accounts/failover.log`、上限中のアカウント: `claude-account list` の「上限（… まで）」。
+
 注意:
 
 - usagebar（Agent Usage）に `[[claude.profiles]]` を足すと、上限ペインと通知がアカウントごとになる。ただし usagebar はセッションのファイルがどのプロファイルの `projects` にあるかでペインのアカウントを決めるため、`projects` を共有していると判定が当たらない。サイドバーでは usagebar の `$limit` の代わりに `$acct` を使う。
-- 追加アカウントの `.claude.json` は、作るときに既定の `mcpServers` と信頼済みフォルダだけを写す。あとから既定に足した MCP サーバーは写らない。
+- 追加アカウントの `.claude.json` は、作るときに `~/.claude` のアカウントの `mcpServers` と信頼済みフォルダだけを写す。あとから既定に足した MCP サーバーは写らない。
 - 棚（herdr-shelf）を使っているなら、開き直すときは `claude-account of-session` でしまったときのアカウントを引く。
 
 ### 8. Claude Code へのワークフロー指示
