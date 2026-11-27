@@ -1,7 +1,11 @@
 # Claude Code のアカウント一覧（claude-account が読む）。~/.config/claude-accounts/accounts に置く
 # 1行1アカウント: <id> <config_dir> <badge> <表示名…>
-# - 最初の行が既定。既定は ~/.claude にして、CLAUDE_CONFIG_DIR を設定しない
+# - 最初の行は ~/.claude のアカウントにして、CLAUDE_CONFIG_DIR を設定しない
 #   （設定すると Keychain の項目名が変わり、ログインしていない扱いになる）
 # - id は [a-z0-9-]。badge はサイドバーで色の代わりに使う1文字
+# - `@default <id>` は `claude` とだけ打ったときのアカウント（無ければ最初の行）。
+#   上限に達していれば次に使えるものになる。上限で止まった会話も、この順で次のアカウントへ自動で移る
 work       ~/.claude            🟦  Work
 personal   ~/.claude-personal   🟪  Personal
+
+# @default personal
