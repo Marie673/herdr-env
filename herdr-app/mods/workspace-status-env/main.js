@@ -5,7 +5,7 @@
 //            ⊞ で右のペインに固定できる
 //
 // データは ~/.config/herdr/bin/ai-usage-collect.py（各ツールのキャッシュを読む）と、
-// claude-account が hc のラベル herdr-env.lim に書く Claude の残りの両方から。新しい方を使う。
+// claude-account が hc のラベル herdr-env.lim に書く Claude の残り（集計に無いアカウントだけ）から。
 // 残り（% left）は多いほど安全。50% 以下は黄、20% 以下は赤。
 
 import { View, div, svg, image } from "gpui-kit";
@@ -247,13 +247,10 @@ export default class WorkspaceStatusEnv extends View {
     for (const [id, live] of liveClaude.entries()) {
       const parsed = parseLimWindows(live.lim);
       const prev = claudeMap.get(id);
-      const prevByLbl = new Map((prev?.windows ?? []).map((w) => [w.label, w]));
-      // ラベル（5h / 7d だけ）の方が新しいときだけ、その枠の値を差し替える。モデル別の枠（Fable 等）は残す
-      const newer = live.at > (prev?.updated_at ?? 0);
-      const liveByLbl = new Map(parsed.map((w) => [w.label, w]));
-      const mergedWins = prev?.windows?.length
-        ? prev.windows.map((w) => (newer && liveByLbl.has(w.label) ? { ...w, remaining: liveByLbl.get(w.label).remaining } : w))
-        : parsed;
+      // 集計（ai-usage-collect.py）が値を持っていればそちらだけを使う。ラベルは会話ごとに最後に API を
+      // 呼んだときの値で、手の空いた会話も古い値のまま lim_at を新しくするので、時刻で選ぶと値が入れ替わり続ける
+      // （集計は会話ごとの値から、リセット時刻と残りで新しいものを選んでいる）
+      const mergedWins = prev?.windows?.length ? prev.windows : parsed;
       const cleanName = live.name.replace(/^[^\p{L}\p{N}]+/u, "").trim() || live.name;
       const badge = prev?.badge || [...live.name][0] || "🟦";
       claudeMap.set(id, {

@@ -74,7 +74,7 @@ TUI の `~/.config/herdr/config.toml`・ローカルプラグイン・`herdr` �
 | wt-audit（終わったワークツリーの片付け） | `herdr-app ls` の GUI のスペースも突き合わせる（id は `gui:<space id>`）。スペースのフォルダと、各ターミナルがいまいるディレクトリのワークツリーに、そのターミナルの agent の状態を結びつけ、working / blocked なら `--auto` で消さない。片付けるときは GUI のスペースも閉じる。通知は TUI が動いていなければ macOS の通知 |
 | 棚（herdr-shelf） | GUI の agent も同じ条件（idle・表示していない・外部待ちでない・会話の記録が24時間更新されていない）でしまう。会話 ID は `claude-account` が付けるラベル `herdr-env.session`（無ければ起動引数の `--resume`）。`cmd+shift+z` でフォーカス中の agent をしまい、`cmd+shift+s` で棚から開き直す（GUI のターミナルから呼べば GUI に、元のスペースか同じフォルダのスペースへタブで開く）。1時間ごとの定期実行（`launchd/herdr-env.herdr-shelf.plist.in`）は TUI と GUI の両方を見る |
 | 落ちた会話の再開（herdr-revive） | herdr-core が落ちる（Herdr の再起動・クラッシュ・ログアウト）と、ターミナルは同じアドレスのまま最後のフォルダのシェルに戻り、claude は二度と動かない。シェルの起動時（`zsh/claude-account.zsh` の precmd 1回）に `herdr-revive --line $$` が、そのターミナルのラベル `herdr-env.session` / `herdr-env.acct_id` から `claude -A <acct> --resume <id>` を打ち直す。/exit・Ctrl-C で終えた会話は SessionEnd hook がラベルを消すので戻さない。同じ会話がほかで動いているとき・記録が無いときも戻さず、同じシェル・同じ会話では一度しか試さない。すでにシェルに戻っている分は `herdr-revive` で一括（`--dry-run` で対象だけ） |
-| Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
+| Claude のアカウント（`$acct`、claude-accounts） | `claude-account hook`（SessionStart と statusLine）が GUI のターミナルにラベル `herdr-env.session` / `herdr-env.acct_id` / `herdr-env.acct` / `herdr-env.lim`（5h / 7d の残り）/ `herdr-env.lim_rs`（そのリセット時刻）/ `herdr-env.lim_at` を付ける。`herdr-env-marks` のカードにアカウントごとの残りを出し（上限はアカウント単位なので、リセット時刻と残りで選んだ一番新しい値。20% 以下は赤、50% 以下は黄。下部のステータスバーに利用量を出す mod `workspace-status-env` を入れているときは出さない）、`agents-env` はアカウントを2つ以上使っているとき行にその色の小さな丸（🟦 は青、🟪 は紫）を出す。`cmd+shift+u` でフォーカス中のペインの下にピッカーを開き、Enter で新しいタブに起動、ctrl-s でその会話を同じ会話のまま別アカウントで開き直す（`claude-account start / switch --terminal`） |
 | モデルの切り替え（Claude Code の `cmd+p`） | GUI では `cmd+p` がピッカー（検索）に取られる。代わりに `cmd+shift+m` でフォーカス中の agent のモデル選択を開く（`herdr/bin/agent-model.py`）。Claude Code には既定のキー `alt+p` を送る（下書きは残る）。Codex と Antigravity CLI はモデル選択のキーが無いので `/model` を打って Enter を押す。下書きの後ろに打つと下書きごと送ってしまうため、画面を読んで入力欄が空のときだけ打ち、下書きがあるとき・動作中・確認待ちのときは打たずに通知で知らせる |
 | issue-board（issue / PR 一覧） | 右パネル（Files / Changes のスタック）に mod `issues-env` の **Issues** を足す（下記）。タブバーの Issues ボタン（`herdr-app/tabs-env.py` が標準の tabs を複製して足す）か `cmd+shift+i` で出し入れする。TUI の fzf 版をターミナルで開くことはしない（GUI にはペイン幅を変えるコマンドが無く、一覧が画面の半分を取るため） |
 | `gwt`（素のシェル / `--task`） | `herdr-app do space.new`（既にそのワークツリーのスペースがあれば `tab.new`）で開き、Claude Code を起動する。`--task` の依頼文は最初のプロンプトとして渡す（GUI の `task` 引数はシェル経由の起動に届かないため、ファイル経由で引数にする）。`--title` を新しいスペースの名前にし、既にあるスペースは名前がフォルダ名のまま（人が付け直していない）ときだけ付け直す |
@@ -94,8 +94,9 @@ Herdr.app は既定で、install id 付きの1日分の集計（使っている 
 利用量のバーも出すときは `herdr-app/setup.sh --usage-bar`（一度入れれば、以後は付けずに流しても入れ直す。やめるときは `--no-usage-bar`）。
 `ai-usage-collect.py` が読むもの:
 
-- Claude: `claude/statusline.sh` が残す statusLine の入力（`~/.local/state/herdr-env/statusline/<アカウント>.json` の `rate_limits`）と、
-  Claude Code が `.claude.json` に持つ `cachedUsageUtilization`。アカウントは `~/.config/claude-accounts/accounts`（無ければ `~/.claude` だけ）。
+- Claude: `claude/statusline.sh` が残す statusLine の入力（会話ごとの `~/.local/state/herdr-env/statusline/<アカウント>/<session_id>.json` の `rate_limits`）と、
+  Claude Code が `.claude.json` に持つ `cachedUsageUtilization`。会話ごとの値は、その会話が最後に API を呼んだときのもの
+  なので、枠ごとに「リセット時刻が遅い方、同じなら残りが少ない方」を新しい値として選ぶ。アカウントは `~/.config/claude-accounts/accounts`（無ければ `~/.claude` だけ）。
   モデル別の週の枠まで新しい値で出したいときは `~/.config/herdr-env/usage.json` に `{"claude_usage_api": true}` を書く。
   Keychain にある Claude Code のトークンで `/usage` と同じ API（公開されていない）を5分に1回まで呼ぶので、既定では切ってある
 - Codex: `~/.codex/sessions/` の記録の `rate_limits`
