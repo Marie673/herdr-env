@@ -218,20 +218,21 @@ def record_agy():
     atomic_write_json(AGY_STATE, snap)
 
     term = os.environ.get("HC_TERMINAL_ID")
-    if term and lim_text:
-        subprocess.run(
-            [
-                "hc",
-                "label",
-                term,
-                "herdr-env.acct_id=antigravity",
-                "herdr-env.acct=✦ Antigravity",
-                f"herdr-env.lim={lim_text}",
-                f"herdr-env.lim_at={int(now)}",
-            ],
-            capture_output=True,
-            timeout=3,
-        )
+    # 会話 ID は herdr-revive が、herdr-core が落ちた後に `agy --conversation <id>` で戻すのに使う
+    # （agy には SessionEnd が無いので、普通に終えたときは zsh の precmd がラベルを消す）
+    conv = data.get("conversation_id") or data.get("session_id") or ""
+    kv = []
+    if conv:
+        kv.append(f"herdr-env.agy_conversation={conv}")
+    if lim_text:
+        kv += [
+            "herdr-env.acct_id=antigravity",
+            "herdr-env.acct=✦ Antigravity",
+            f"herdr-env.lim={lim_text}",
+            f"herdr-env.lim_at={int(now)}",
+        ]
+    if term and kv:
+        subprocess.run(["hc", "label", term] + kv, capture_output=True, timeout=3)
 
 
 def record_gemini():

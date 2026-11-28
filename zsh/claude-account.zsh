@@ -42,6 +42,20 @@ if [[ -o interactive && -n "${HC_TERMINAL_ID:-}" ]] && command -v herdr-revive >
         unset _herdr_revive_line
         zle .accept-line
     }
+    # agy には SessionEnd が無いので、agy が終わってプロンプトに戻ったら会話 ID のラベル
+    # （statusline が付ける herdr-env.agy_conversation）をここで消す。落ちたときはシェルごと
+    # 消えるのでラベルが残り、herdr-revive が `agy --conversation <id>` で戻す
+    _herdr_agy_preexec() {
+        local cmd="${1%% *}"
+        [[ "${cmd:t}" == agy ]] && typeset -g _herdr_agy_ran=1
+    }
+    _herdr_agy_precmd() {
+        [[ -n "${_herdr_agy_ran:-}" ]] || return 0
+        unset _herdr_agy_ran
+        hc label "${HC_TERMINAL_ID}" herdr-env.agy_conversation= > /dev/null 2>&1
+    }
     autoload -Uz add-zsh-hook add-zle-hook-widget
     add-zsh-hook precmd _herdr_revive_once
+    add-zsh-hook preexec _herdr_agy_preexec
+    add-zsh-hook precmd _herdr_agy_precmd
 fi
