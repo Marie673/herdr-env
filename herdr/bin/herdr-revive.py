@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""herdr-revive: Herdr.app（GUI）で消えた claude の会話を、同じターミナルで --resume し直す。
+"""herdr-revive: Herdr.app（GUI）で消えた claude / agy の会話を、同じターミナルで開き直す。
 
-herdr-core が落ちる（Herdr の再起動・クラッシュ・再起動・ログアウト）と、ターミナルは同じアドレスのまま
-最後のフォルダのシェルに戻るが、元のコマンド（claude）は二度と動かない。claude-account の hooks が
-付けたラベル herdr-env.session（会話 ID）と herdr-env.acct_id（アカウント）はラベルとして残るので、
-それを見て `claude -A <acct> --resume <id>` を打ち直す。
+herdr-core が落ちる（Herdr の再起動・クラッシュ・再起動・ログアウト・電池切れ）と、ターミナルは同じ
+アドレスのまま最後のフォルダのシェルに戻るが、元のコマンドは二度と動かない。会話 ID はターミナルの
+ラベルとして残るので、それを見て打ち直す。
+
+  - claude: claude-account の hooks が付けるラベル herdr-env.session（会話 ID）と
+    herdr-env.acct_id（アカウント）から `claude -A <acct> --resume <id>`
+  - agy（Antigravity CLI）: statusline（ai-usage-collect.py --record-agy）が付けるラベル
+    herdr-env.agy_conversation から `agy --conversation <id>`
 
   herdr-revive              GUI の全ターミナルを見て、戻すべきものに打ち込む（hc send）
   herdr-revive --dry-run    戻す対象を出すだけ
@@ -12,13 +16,14 @@ herdr-core が落ちる（Herdr の再起動・クラッシュ・再起動・ロ
 
 戻す条件:
   - Herdr のスペースに属する（ラベル herdr.space）
-  - ラベル herdr-env.session がある。/exit や Ctrl-C で正常に終わった会話は SessionEnd hook が
-    ラベルを消すので対象にならない（落ちたときだけ残る）
+  - 会話 ID のラベルがある。claude を /exit や Ctrl-C で終えたときは SessionEnd hook が、agy を
+    終えたときは zsh の precmd がラベルを消すので対象にならない（落ちたときだけ残る）
   - ターミナルの最上位のシェルが前面にいる（何も動いていない）
   - 同じ会話がほかのターミナルで動いていない
-  - 会話の記録（~/.claude/projects/*/<id>.jsonl）がある
+  - 会話の記録（claude: ~/.claude*/projects/*/<id>.jsonl、agy: ~/.gemini/antigravity-cli/conversations/<id>.db）がある
   - 同じシェル（アドレス・PID）・同じ会話では一度しか試さない（失敗してもループしない）
 """
+import fcntl
 import glob
 import json
 import os
@@ -30,6 +35,8 @@ import time
 SHELLS = {"zsh", "bash", "sh", "fish", "-zsh", "-bash"}
 STATE = os.path.expanduser("~/.local/state/herdr-revive")
 TRIED = os.path.join(STATE, "tried.json")
+LOCK = os.path.join(STATE, "tried.lock")
+AGY_CONVERSATIONS = os.path.expanduser("~/.gemini/antigravity-cli/conversations")
 
 
 def hc(args):
@@ -60,53 +67,80 @@ def is_idle_shell(info):
     return name in SHELLS and fg.get("pid") == info.get("pid")
 
 
-def has_transcript(sid):
+def claude_transcript(sid):
     homes = [os.path.expanduser("~/.claude")] + glob.glob(os.path.expanduser("~/.claude-*"))
     return any(glob.glob(os.path.join(h, "projects", "*", sid + ".jsonl")) for h in homes)
 
 
-def load_tried():
-    try:
-        with open(TRIED) as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        d = {}
-    cutoff = time.time() - 7 * 86400
-    return {k: v for k, v in d.items() if v > cutoff}
+def agy_transcript(cid):
+    return os.path.exists(os.path.join(AGY_CONVERSATIONS, cid + ".db"))
 
 
-def save_tried(d):
-    os.makedirs(STATE, exist_ok=True)
-    tmp = TRIED + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(d, f)
-    os.replace(tmp, TRIED)
+def sessions(labels):
+    """ターミナルのラベルから、戻せる会話を (種類, ID, 打つ行, 記録があるか) で返す"""
+    out = []
+    sid = labels.get("herdr-env.session")
+    if sid:
+        acct = labels.get("herdr-env.acct_id") or ""
+        if acct == "antigravity":  # agy の statusline が付ける値。claude のアカウントではない
+            acct = ""
+        parts = ["claude"] + (["-A", acct] if acct else []) + ["--resume", sid]
+        out.append(("claude", sid, " ".join(shlex.quote(p) for p in parts), claude_transcript))
+    cid = labels.get("herdr-env.agy_conversation")
+    if cid:
+        out.append(("agy", cid, "agy --conversation " + shlex.quote(cid), agy_transcript))
+    return out
 
 
-def command_line(labels):
-    sid = labels["herdr-env.session"]
-    acct = labels.get("herdr-env.acct_id") or ""
-    parts = ["claude"] + (["-A", acct] if acct else []) + ["--resume", sid]
-    return " ".join(shlex.quote(p) for p in parts)
+class Tried:
+    """試した (アドレス:PID:会話) の記録。シェルが一斉に起動すると --line が同時に動くので、
+    読み書きはロックの中で行う（ロック無しだと書き込みが互いに消し合う）"""
+
+    def __enter__(self):
+        os.makedirs(STATE, exist_ok=True)
+        self.fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        try:
+            with open(TRIED) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        cutoff = time.time() - 7 * 86400
+        self.d = {k: v for k, v in d.items() if v > cutoff}
+        return self
+
+    def __contains__(self, key):
+        return key in self.d
+
+    def add(self, key):
+        self.d[key] = time.time()
+        tmp = TRIED + ".tmp.%d" % os.getpid()
+        with open(tmp, "w") as f:
+            json.dump(self.d, f)
+        os.replace(tmp, TRIED)
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.fd, fcntl.LOCK_UN)
+        os.close(self.fd)
 
 
 def candidates(infos, tried):
     running = set()
     for i in infos:
-        sid = (i.get("labels") or {}).get("herdr-env.session")
-        if sid and not is_idle_shell(i):
-            running.add(sid)
+        if not is_idle_shell(i):
+            running.update(s[1] for s in sessions(i.get("labels") or {}))
     seen = set()
     for i in infos:
         labels = i.get("labels") or {}
-        sid = labels.get("herdr-env.session")
-        if not sid or not labels.get("herdr.space") or not is_idle_shell(i):
+        if not labels.get("herdr.space") or not is_idle_shell(i):
             continue
-        key = "%s:%s:%s" % (i["address"], i.get("pid"), sid)
-        if sid in running or sid in seen or key in tried or not has_transcript(sid):
-            continue
-        seen.add(sid)
-        yield i, key
+        for kind, sid, line, has_transcript in sessions(labels):
+            key = "%s:%s:%s" % (i["address"], i.get("pid"), sid)
+            if sid in running or sid in seen or key in tried or not has_transcript(sid):
+                continue
+            seen.add(sid)
+            yield i, key, line
+            break  # 1つのターミナルで戻すのは1つだけ
 
 
 def cmd_line(shell_pid):
@@ -117,30 +151,30 @@ def cmd_line(shell_pid):
     info = hc(["get", term, "--json"])
     if not info or info.get("pid") != int(shell_pid):
         return 0
-    others = [i for i in terminals() if i.get("address") != term] if (info.get("labels") or {}).get("herdr-env.session") else []
-    tried = load_tried()
-    for i, key in candidates([info] + others, tried):
-        if i.get("address") != term:
-            continue
-        tried[key] = time.time()
-        save_tried(tried)
-        print(command_line(i["labels"]))
+    if not sessions(info.get("labels") or {}):
+        return 0
+    others = [i for i in terminals() if i.get("address") != term]
+    with Tried() as tried:
+        for i, key, line in candidates([info] + others, tried):
+            if i.get("address") != term:
+                continue
+            tried.add(key)
+            print(line)
+            break
     return 0
 
 
 def cmd_all(dry):
-    tried = load_tried()
     n = 0
-    for i, key in candidates(terminals(), tried):
-        line = command_line(i["labels"])
-        where = (i.get("labels") or {}).get("where") or i.get("cwd")
-        print("%s  %s  %s" % (i["address"], where, line))
-        n += 1
-        if dry:
-            continue
-        tried[key] = time.time()
-        save_tried(tried)
-        hc(["send", i["address"], line])
+    with Tried() as tried:
+        for i, key, line in candidates(terminals(), tried):
+            where = (i.get("labels") or {}).get("where") or i.get("cwd")
+            print("%s  %s  %s" % (i["address"], where, line))
+            n += 1
+            if dry:
+                continue
+            tried.add(key)
+            hc(["send", i["address"], line])
     if not n:
         print("戻す会話はありません")
     return 0
